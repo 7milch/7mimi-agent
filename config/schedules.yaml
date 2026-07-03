@@ -80,6 +80,30 @@ jobs:
       type: verification_report
       path_template: ".data/generated/weekly/research-review-{date}.md"
 
+
+  - name: ai-it-x-daily-digest
+    description: XからAI/IT関連Topicを収集し、専用docs repoへdaily digestをpushする。
+    role: ai_it_topic_runner
+    enabled: true
+    cron: "0 8 * * *"
+    active_deadline_seconds: 1200
+    inputs:
+      query_set: ai_it_watch
+      max_posts_per_query: 50
+      output_repo: nishiog/ai-it-research-notes
+      output_branch: main
+    prompt: |
+      XからAI/IT関連Topicを収集してください。
+      主な対象はAI agent、MCP、Claude Code、Codex、developer tools、AI securityです。
+      X投稿はsignalとして扱い、可能な限りリンク先、公式docs、GitHub、release notes、一次情報を確認してください。
+      X投稿本文の大量転載は避け、post URL / source URL / 要約を残してください。
+      Markdownのdaily digestを生成し、専用docs repositoryへ保存してください。
+    output:
+      type: github_markdown_repo
+      repo: nishiog/ai-it-research-notes
+      path_template: "daily/{yyyy}/{mm}/{date}.md"
+      commit_message_template: "Add AI/IT daily digest for {date}"
+
 query_sets:
   default_x_watch:
     description: MVP用の仮監視クエリ。実運用前にユーザーと調整する。
@@ -88,3 +112,20 @@ query_sets:
       - "J-Quants 日本株 決算"
       - "日本株 半導体 データセンター"
       - "日本株 防衛 電力"
+
+
+  ai_it_watch:
+    description: AI/IT topic documentation runner用の監視クエリ。
+    queries:
+      - '"AI agent" MCP'
+      - '"Claude Code"'
+      - '"Codex" OpenAI'
+      - '"Model Context Protocol"'
+      - '"MCP server"'
+      - '"agentic coding"'
+      - '"coding agent"'
+      - '"AI security" "prompt injection"'
+      - '"GitHub Copilot" agent'
+      - "AIエージェント MCP"
+      - "コーディングエージェント"
+      - "生成AI 開発者ツール"

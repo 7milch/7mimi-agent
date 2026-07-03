@@ -152,17 +152,21 @@ mcp_servers:
       - document.read
       - document.write_markdown
       - document.update_research_queue
+      - document.commit_and_push_markdown_repo
     deny_tools:
       - document.write_outside_workspace
       - document.delete_recursive
     path_policy:
       allowed_roots:
         - .data/generated
+        - external:github:nishiog/ai-it-research-notes
       deny_paths:
         - .env
         - .env.*
         - .git
         - ~/.ssh
+        - .github/workflows
+        - secrets
 
   metrics:
     description: Best-effort metrics and audit event recording.
@@ -173,6 +177,32 @@ mcp_servers:
       - metrics.record_event
       - metrics.record_output
     deny_tools: []
+
+
+document_repositories:
+  ai_it_research_notes:
+    repo: nishiog/ai-it-research-notes
+    visibility: public
+    purpose: AI/IT topic daily digests and topic notes generated from X signals and verified web sources.
+    write_mode: direct_push
+    branch: main
+    commit_author: 7mimi-agent
+    allowed_paths:
+      - README.md
+      - daily/**
+      - weekly/**
+      - topics/**
+      - queue/**
+    denied_paths:
+      - .github/**
+      - .env
+      - .env.*
+      - secrets/**
+      - config/**
+    required_checks:
+      - redaction_policy
+      - source_refs_present
+      - no_bulk_x_post_text
 
 role_tool_policy:
   orchestrator:
@@ -195,6 +225,35 @@ role_tool_policy:
       - x.send_dm
       - document.write_markdown
       - jquants.*
+
+
+  ai_it_topic_runner:
+    allow:
+      - x.search_posts_recent
+      - x.get_posts
+      - x.get_users
+      - x.get_users_by_username
+      - web.fetch_url
+      - web.extract_article
+      - web.extract_pdf_text
+      - document.read
+      - document.write_markdown
+      - document.commit_and_push_markdown_repo
+      - document.update_research_queue
+      - queue.append_candidate
+      - queue.update_status
+      - metrics.record_event
+      - metrics.record_output
+    deny:
+      - x.create_post
+      - x.like_post
+      - x.repost
+      - x.follow_user
+      - x.send_dm
+      - jquants.*
+      - trading.*
+      - document.write_outside_workspace
+      - document.delete_recursive
 
   stock_researcher:
     allow:
