@@ -1,0 +1,21 @@
+# Runtime / generated artifacts
+.env
+.env.*
+!.env.example
+
+# Agent runtime state
+.sessions/
+.data/
+.cache/
+logs/
+
+# Dependencies / build outputs
+node_modules/
+dist/
+build/
+coverage/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

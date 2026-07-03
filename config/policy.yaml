@@ -1,0 +1,225 @@
+# 7mimi Agent platform policy.
+# Security controls should be deterministic and enforced outside the LLM.
+
+version: 1
+
+principles:
+  pre_tool_use_failure: block     # fail-closed
+  post_tool_use_failure: continue # fail-open
+  external_content_trust: untrusted
+  x_is_signal_not_evidence: true
+  investment_advice: prohibited
+  autonomous_trading: prohibited
+  agent_runner_has_api_keys: false
+
+mcp_servers:
+  x_mcp_readonly:
+    description: X MCP with read-only allowlist.
+    secret_scope: x_credentials
+    network: external
+    default_access: deny
+    allow_tools:
+      - x.search_posts_recent
+      - x.get_posts
+      - x.get_users
+      - x.get_users_by_username
+    deny_tools:
+      - x.create_post
+      - x.delete_post
+      - x.like_post
+      - x.unlike_post
+      - x.repost
+      - x.unrepost
+      - x.follow_user
+      - x.unfollow_user
+      - x.send_dm
+      - x.update_profile
+    rate_limit:
+      per_minute: 30
+      per_hour: 600
+    cache:
+      enabled: true
+      ttl_seconds: 300
+
+  jquants:
+    description: J-Quants MCP for Japanese equity structured data.
+    secret_scope: jquants_api_key
+    network: external
+    default_access: deny
+    allow_tools:
+      - jquants.get_listed_info
+      - jquants.get_daily_quotes
+      - jquants.get_financial_statements
+      - jquants.get_dividends
+      - jquants.get_earnings_calendar
+    deny_tools: []
+    rate_limit:
+      per_minute: 60
+      per_hour: 1000
+    cache:
+      enabled: true
+      ttl_seconds: 3600
+    required_metadata:
+      - fetched_at
+      - source
+      - period
+      - unit
+
+  web_fetch:
+    description: Fetch public web pages and PDFs. All content is untrusted.
+    secret_scope: none
+    network: external
+    default_access: deny
+    allow_tools:
+      - web.fetch_url
+      - web.extract_article
+      - web.extract_pdf_text
+    deny_tools:
+      - web.submit_form
+      - web.execute_javascript_write
+    rate_limit:
+      per_minute: 20
+      per_hour: 300
+    cache:
+      enabled: true
+      ttl_seconds: 86400
+    url_policy:
+      deny_private_networks: true
+      deny_file_scheme: true
+      deny_localhost: true
+
+  research_queue:
+    description: Append/update research candidates in local SQLite.
+    secret_scope: none
+    network: local
+    default_access: deny
+    allow_tools:
+      - queue.append_candidate
+      - queue.update_status
+      - queue.list_candidates
+      - queue.get_candidate
+    deny_tools:
+      - queue.delete_all
+
+  document_store:
+    description: Read/write Markdown outputs under controlled generated directories.
+    secret_scope: none
+    network: local
+    default_access: deny
+    allow_tools:
+      - document.read
+      - document.write_markdown
+      - document.update_research_queue
+    deny_tools:
+      - document.write_outside_workspace
+      - document.delete_recursive
+    path_policy:
+      allowed_roots:
+        - .data/generated
+      deny_paths:
+        - .env
+        - .env.*
+        - .git
+        - ~/.ssh
+
+  metrics:
+    description: Best-effort metrics and audit event recording.
+    secret_scope: none
+    network: local
+    default_access: deny
+    allow_tools:
+      - metrics.record_event
+      - metrics.record_output
+    deny_tools: []
+
+role_tool_policy:
+  orchestrator:
+    allow: []
+
+  x_collector:
+    allow:
+      - x.search_posts_recent
+      - x.get_posts
+      - x.get_users
+      - x.get_users_by_username
+      - web.fetch_url
+      - web.extract_article
+      - queue.append_candidate
+    deny:
+      - x.create_post
+      - x.like_post
+      - x.repost
+      - x.follow_user
+      - x.send_dm
+      - document.write_markdown
+      - jquants.*
+
+  stock_researcher:
+    allow:
+      - jquants.get_listed_info
+      - jquants.get_daily_quotes
+      - jquants.get_financial_statements
+      - jquants.get_dividends
+      - jquants.get_earnings_calendar
+      - web.fetch_url
+      - web.extract_article
+      - document.read
+      - queue.get_candidate
+      - queue.update_status
+    deny:
+      - x.*
+      - document.write_markdown
+      - trading.*
+
+  document_writer:
+    allow:
+      - document.read
+      - document.write_markdown
+      - document.update_research_queue
+      - queue.list_candidates
+      - queue.update_status
+      - metrics.record_output
+    deny:
+      - x.*
+      - jquants.*
+      - web.fetch_url
+      - trading.*
+
+  source_verifier:
+    allow:
+      - jquants.get_listed_info
+      - jquants.get_daily_quotes
+      - jquants.get_financial_statements
+      - web.fetch_url
+      - web.extract_article
+      - document.read
+      - metrics.record_event
+    deny:
+      - x.*
+      - document.write_markdown
+      - trading.*
+
+command_policy:
+  # For future shell tool. MVP should avoid generic shell where possible.
+  default_shell_access: deny
+  denied_patterns:
+    - "rm\\s+-rf"
+    - "sudo"
+    - "chmod\\s+777"
+    - "\\.env(\\.|$|\\s)"
+    - "id_rsa"
+    - "gh\\s+auth\\s+token"
+    - "git\\s+push"
+    - "npm\\s+publish"
+    - "docker\\s+run\\s+.*--privileged"
+
+redaction_policy:
+  enabled: true
+  block_on_secret_like_output: true
+  patterns:
+    - name: env_assignment
+      regex: "(?i)(api[_-]?key|secret|token|password)\\s*="
+    - name: private_key
+      regex: "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    - name: bearer_token
+      regex: "Bearer\\s+[A-Za-z0-9._~+/-]+=*"

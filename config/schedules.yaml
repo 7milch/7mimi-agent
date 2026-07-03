@@ -1,0 +1,90 @@
+# 7mimi Agent schedule definitions.
+# Times are Asia/Tokyo unless explicitly overridden.
+
+version: 1
+
+defaults:
+  timezone: Asia/Tokyo
+  concurrency_policy: forbid
+  backoff_limit: 1
+  enabled: true
+
+jobs:
+  - name: x-signal-collector
+    description: XからAI Agent/日本株関連のsignalを収集しresearch_queueへ登録する。
+    role: x_collector
+    enabled: true
+    cron: "*/30 8-23 * * *"
+    active_deadline_seconds: 600
+    inputs:
+      query_set: default_x_watch
+      max_posts_per_query: 50
+    prompt: |
+      監視クエリに基づいてX投稿を収集してください。
+      日本株銘柄、AI Agent関連技術、重要URLを抽出し、research_queueに登録してください。
+      Xへのwrite操作は禁止です。X投稿はsignalでありevidenceではありません。
+    output:
+      type: research_queue
+
+  - name: stock-signal-fact-check
+    description: research_queue上位候補をJ-Quantsでファクト確認する。
+    role: stock_researcher
+    enabled: true
+    cron: "0 16 * * 1-5"
+    active_deadline_seconds: 1200
+    inputs:
+      queue_status: new
+      max_candidates: 10
+      min_score: 50
+    prompt: |
+      research_queueの上位候補について、J-Quants MCPで基本情報・株価・財務・配当・決算予定を確認してください。
+      X情報は調査トリガーとしてのみ扱い、根拠にはしないでください。
+      取得日時、対象期間、単位、未確認事項を明示してください。
+    output:
+      type: fact_snapshot
+      next_role: source_verifier
+
+  - name: daily-digest-writer
+    description: その日のX signalとfact check結果からMarkdown digestを作成する。
+    role: document_writer
+    enabled: true
+    cron: "30 17 * * 1-5"
+    active_deadline_seconds: 900
+    inputs:
+      since: today
+      include_statuses:
+        - fact_checked
+        - verified
+    prompt: |
+      本日のXシグナルとJ-Quantsによるファクト確認結果をもとに、daily digestをMarkdownで作成してください。
+      売買推奨ではなく、調査候補と確認済み事実を分けてください。
+      X由来情報はsignal欄に分離してください。
+    output:
+      type: markdown
+      path_template: ".data/generated/daily/{date}.md"
+
+  - name: weekly-research-review
+    description: research_queueと生成済みドキュメントを週次で整理する。
+    role: source_verifier
+    enabled: true
+    cron: "0 10 * * 6"
+    active_deadline_seconds: 1800
+    backoff_limit: 0
+    inputs:
+      lookback_days: 7
+    prompt: |
+      過去7日分のresearch_queueと生成済みドキュメントを見直してください。
+      古い候補、根拠が弱い候補、深掘りすべき候補を分類してください。
+      投資助言表現、出典不足、X情報の事実扱いがあれば指摘してください。
+    output:
+      type: verification_report
+      path_template: ".data/generated/weekly/research-review-{date}.md"
+
+query_sets:
+  default_x_watch:
+    description: MVP用の仮監視クエリ。実運用前にユーザーと調整する。
+    queries:
+      - "AI Agent MCP Claude Code Codex"
+      - "J-Quants 日本株 決算"
+      - "日本株 半導体 データセンター"
+      - "日本株 防衛 電力"
