@@ -8,6 +8,7 @@
 .data/
 .cache/
 logs/
+.secrets/
 
 # Dependencies / build outputs
 node_modules/

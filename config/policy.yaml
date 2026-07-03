@@ -11,6 +11,48 @@ principles:
   investment_advice: prohibited
   autonomous_trading: prohibited
   agent_runner_has_api_keys: false
+  agent_runner_has_claude_credentials: false
+  claude_proxy_holds_claude_credentials: true
+  auth_proxy_holds_tool_credentials: true
+
+claude_proxy:
+  description: >
+    Claude API credential boundary / API proxy. The proxy owns provider
+    credentials for Anthropic / Claude API and forwards LLM API traffic from
+    agent-runners. It does not own Claude Code processes or session workspaces.
+  credential_scope: claude_provider_credential
+  runner_receives_provider_token: false
+  runner_receives_gateway_token: true
+  gateway_token_policy:
+    type: session_scoped
+    ttl_seconds: 3600
+    bind_to:
+      - session_id
+      - role
+      - runner_id
+  allowed_runner_env:
+    - CLAUDE_PROXY_URL
+    - CLAUDE_PROXY_SESSION_TOKEN
+    - SESSION_ID
+    - ROLE
+  denied_runner_env:
+    - ANTHROPIC_API_KEY
+    - CLAUDE_CODE_OAUTH_TOKEN
+    - CLAUDE_SUBSCRIPTION_TOKEN
+    - CLAUDE_CONFIG_DIR
+  controls:
+    rate_limit: true
+    budget_limit: true
+    audit_log: true
+    session_attribution: true
+    secret_redaction: true
+    prompt_logging: metadata_only
+  rate_limit:
+    requests_per_minute: 20
+    requests_per_hour: 500
+  budget:
+    daily_usd_soft_limit: null
+    daily_usd_hard_limit: null
 
 mcp_servers:
   x_mcp_readonly:
@@ -223,3 +265,7 @@ redaction_policy:
       regex: "-----BEGIN [A-Z ]*PRIVATE KEY-----"
     - name: bearer_token
       regex: "Bearer\\s+[A-Za-z0-9._~+/-]+=*"
+    - name: anthropic_key
+      regex: "sk-ant-[A-Za-z0-9._-]+"
+    - name: claude_proxy_session_token
+      regex: "cp_sess_[A-Za-z0-9._-]+"
