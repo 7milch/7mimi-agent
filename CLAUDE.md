@@ -71,6 +71,10 @@ Both paths converge on `execute_runner_task`, which currently only supports `ai_
 - `security/path_policy.py` enforces the allowed/denied path globs from `document_repositories` in policy.yaml (e.g. no writes to `.github/**`, `.env`, `secrets/**` in the notes repo).
 - X posts are signals, never evidence; investment advice and X write operations are prohibited by policy.
 
+### Spec-driven development
+
+Docs under `docs/` are the spec; implement according to them, not ad hoc. Before implementing, check the relevant sections of `docs/architecture/`, `docs/detailed-design/`, `docs/workflows/` and the latest ADRs in `docs/planning/adr.md`. If a recent ADR contradicts the older design docs, **update the design docs first** to reflect the ADR, then implement against the updated docs. Never write code that follows neither — if neither the docs nor an ADR covers a decision you need, record the ADR, update the docs, then implement.
+
 ### ADR discipline (enforced by Stop hook)
 
 Any change that alters architecture, security boundaries, language/tooling choices, or platform policy **must** be recorded as an ADR in `docs/planning/adr.md` **in the same work session** (append-only, numbered sequentially after the last existing ADR: `### ADR-NNN: <title>` with `Decision:` and `Reason:`). This applies to changes under `docs/architecture/`, `docs/detailed-design/`, `docs/workflows/`, and `config/*.yaml`. A Stop hook (`.claude/hooks/adr-check.sh`) blocks completion when those paths changed without an `adr.md` update — either add the ADR, or state explicitly to the user why no ADR is needed (typo fix, already covered by an existing ADR). Update existing ADRs rather than duplicating when a prior decision is revised.
