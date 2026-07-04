@@ -71,6 +71,10 @@ Both paths converge on `execute_runner_task`, which currently only supports `ai_
 - `security/path_policy.py` enforces the allowed/denied path globs from `document_repositories` in policy.yaml (e.g. no writes to `.github/**`, `.env`, `secrets/**` in the notes repo).
 - X posts are signals, never evidence; investment advice and X write operations are prohibited by policy.
 
+### ADR discipline (enforced by Stop hook)
+
+Any change that alters architecture, security boundaries, language/tooling choices, or platform policy **must** be recorded as an ADR in `docs/planning/adr.md` **in the same work session** (append-only, numbered sequentially after the last existing ADR: `### ADR-NNN: <title>` with `Decision:` and `Reason:`). This applies to changes under `docs/architecture/`, `docs/detailed-design/`, `docs/workflows/`, and `config/*.yaml`. A Stop hook (`.claude/hooks/adr-check.sh`) blocks completion when those paths changed without an `adr.md` update — either add the ADR, or state explicitly to the user why no ADR is needed (typo fix, already covered by an existing ADR). Update existing ADRs rather than duplicating when a prior decision is revised.
+
 ### Documentation
 
 Design docs live in `docs/` (Japanese): `docs/README.md` is the entry point; ADRs are appended to `docs/planning/adr.md`. Placeholder packages (`orchestrator/`, `scheduler/`, `proxies/`, `metrics/`, `tools/`) correspond to planned phases in `docs/planning/roadmap.md`.
