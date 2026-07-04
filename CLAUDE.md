@@ -96,3 +96,29 @@ Any change that alters architecture, security boundaries, language/tooling choic
 ### Documentation
 
 Design docs live in `docs/` (Japanese): `docs/README.md` is the entry point; ADRs are appended to `docs/planning/adr.md`. Placeholder packages (`orchestrator/`, `scheduler/`, `proxies/`, `metrics/`, `tools/`) correspond to planned phases in `docs/planning/roadmap.md`.
+
+## Skills & Agents
+
+Development in this repo is orchestrated through the skills and subagents under `.claude/`. When a request matches a skill's trigger, invoke the skill instead of improvising the workflow.
+
+### Skills (`.claude/skills/`)
+
+- `/next-task` — resuming work or picking the next task. Analyzes `docs/planning/` + open issues, proposes candidates, then drives the full cycle: issue → branch `issue-N` → implement → test/review loop → docs/ADR → issue comment & close. Trigger on "what's next", "resume", "続きから".
+- `/new-spec` — starting a new feature from a rough idea. Orchestrates spec definition with tech-lead / product-manager validation before implementation. Trigger on "新機能", "add a new API", "start a new spec".
+- `/brainstorm` — open-ended ideation before any spec exists; produces a structured concept document.
+
+### Subagents (`.claude/agents/`)
+
+The main session acts as orchestrator; specialized work is delegated:
+
+- `implementer` (sonnet) — writes code from a spec.
+- `tester` (sonnet) — writes/runs tests; returns `[TEST-EXECUTION]: SUCCESS | FAIL | SPEC-ISSUE`.
+- `reviewer` (opus) — quality/security/architecture review; returns `[CODE-REVIEW]: APPROVE | CONCERNS | REJECT | SPEC-ISSUE`.
+- `tech-lead` / `product-manager` (opus) — architecture decisions / scope validation during spec phases.
+- `doc-updater` (sonnet) — applies documentation and ADR edits.
+
+### Delegation rules
+
+- **Implementation loop**: implementer → tester → reviewer. Repeat until the tester returns `SUCCESS` **and** the reviewer returns `APPROVE`. Any `SPEC-ISSUE` verdict stops the loop and escalates to the user.
+- **Doc updates go through doc-updater**: the orchestrator decides the exact content first (ADR number, Decision/Reason wording, which docs sections change), then hands doc-updater concrete instructions. doc-updater records decisions; it never makes them.
+- Subagents must not spawn further subagents; only the orchestrator delegates.
