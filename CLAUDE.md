@@ -46,6 +46,20 @@ Only runtime dependency is PyYAML. Tests use stdlib `unittest` (pytest config ex
 
 MCP-first autonomous research agent (inspired by Mercari's remote-claude / pcp-agent). It collects AI/IT topics and Japanese stock signals from X, fact-checks them, and writes Markdown digests — generated notes go to a separate repo (`nishiog/ai-it-research-notes`), never into this repo.
 
+### Directory Structure
+
+```text
+.
+├── .claude/      # Claude Code settings, rules, skills, and agents
+├── config/       # YAML configurations (roles, policy, schedules)
+├── docs/         # Design docs, architecture, and ADRs (the spec)
+├── services/     # Go proxy services for security boundary (auth-proxy, claude-proxy)
+├── src/          # Python orchestration and research logic (shichimimi_agent)
+├── tests/        # Python unit tests
+├── .data/        # SQLite database and dry-run outputs
+└── .sessions/    # Per-session workspace directories
+```
+
 ### Config is the source of truth
 
 Runtime behavior is driven by three YAML files, loaded via `config/loader.py` into a frozen `AppConfig` and cross-validated by `config/validator.py`:
