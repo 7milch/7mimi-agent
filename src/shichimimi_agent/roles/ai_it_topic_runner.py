@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from shichimimi_agent.config.loader import AppConfig
 from shichimimi_agent.db.repository import Repository
@@ -9,6 +11,7 @@ from shichimimi_agent.documents.markdown import TopicDigestItem, render_ai_it_da
 from shichimimi_agent.documents.repository_writer import DocumentRepositoryWriter
 from shichimimi_agent.hooks.post_tool_use import run_post_tool_use
 from shichimimi_agent.hooks.pre_tool_use import PreToolUseInput, run_pre_tool_use
+from shichimimi_agent.mcp.client import McpHttpClient
 from shichimimi_agent.proxies.auth_proxy_client import AuthProxyClient
 from shichimimi_agent.security.policy_engine import PolicyEngine
 from shichimimi_agent.util.time import now_jst
@@ -32,12 +35,14 @@ class AiItTopicRunner:
         repository: Repository,
         policy_engine: PolicyEngine,
         auth_client: AuthProxyClient | None = None,
+        mcp_client_factory: Callable[[str], McpHttpClient] | None = None,
     ) -> None:
         self.config = config
         self.repository = repository
         self.policy_engine = policy_engine
         self.auth_client = auth_client or AuthProxyClient(local_fallback_engine=policy_engine)
         self.writer = DocumentRepositoryWriter(config.root)
+        self._mcp_client_factory = mcp_client_factory or (lambda base_url: McpHttpClient(base_url=base_url))
 
     def run_daily_digest(self, *, session_id: str, task_id: str, job: dict[str, Any], dry_run: bool = True) -> RunnerResult:
         inputs = job.get("inputs") or {}
@@ -45,9 +50,8 @@ class AiItTopicRunner:
         query_set = (self.config.schedules.get("query_sets") or {}).get(query_set_name) or {}
         queries = list(query_set.get("queries") or [])
 
-        # MVP: use deterministic mock collection, but still pass through policy/hook boundary.
-        items = self._collect_mock_topics(session_id=session_id, task_id=task_id, queries=queries)
-        markdown = render_ai_it_daily_digest(queries=queries, items=items, reviewed_posts=len(queries) * 3, fetched_urls=len(items))
+        items, reviewed_posts, fetched_urls = self._collect_topics(session_id=session_id, task_id=task_id, queries=queries)
+        markdown = render_ai_it_daily_digest(queries=queries, items=items, reviewed_posts=reviewed_posts, fetched_urls=fetched_urls)
 
         date = now_jst().date()
         relative_path = f"daily/{date:%Y}/{date:%m}/{date.isoformat()}.md"
@@ -90,6 +94,112 @@ class AiItTopicRunner:
             metadata={"dry_run": dry_run, "target_repo": repo, "target_path": relative_path},
         )
         return RunnerResult(status="succeeded", path=str(write_result.path), title=f"Daily AI/IT Digest - {date.isoformat()}", source_refs=source_refs)
+
+    def _collect_topics(
+        self, *, session_id: str, task_id: str, queries: list[str]
+    ) -> tuple[list[TopicDigestItem], int, int]:
+        x_mcp_url = os.environ.get("X_MCP_URL")
+        if x_mcp_url:
+            return self._collect_real_topics(session_id=session_id, task_id=task_id, queries=queries, x_mcp_url=x_mcp_url)
+        items = self._collect_mock_topics(session_id=session_id, task_id=task_id, queries=queries)
+        return items, len(queries) * 3, len(items)
+
+    def _collect_real_topics(
+        self, *, session_id: str, task_id: str, queries: list[str], x_mcp_url: str
+    ) -> tuple[list[TopicDigestItem], int, int]:
+        client: McpHttpClient | None = None
+        items: list[TopicDigestItem] = []
+        reviewed_posts = 0
+        for query in queries[:3]:
+            # Authorization must happen before any MCP call, and before we know the
+            # response size, so the pre-call post_tool_use record uses output_size=0.
+            decision = run_pre_tool_use(
+                self.auth_client,
+                PreToolUseInput(
+                    session_id=session_id,
+                    task_id=task_id,
+                    role=self.role,
+                    tool_name="x.search_posts_recent",
+                    arguments={"query": query, "max_results": 10},
+                ),
+            )
+            if not decision.allowed:
+                run_post_tool_use(
+                    self.repository,
+                    session_id=session_id,
+                    task_id=task_id,
+                    role=self.role,
+                    tool_name="x.search_posts_recent",
+                    decision=decision.decision,
+                    success=0,
+                    output_size=0,
+                )
+                raise PermissionError(decision.reason)
+
+            if client is None:
+                client = self._mcp_client_factory(x_mcp_url)
+                client.initialize()
+
+            result = client.call_tool("x.search_posts_recent", {"query": query, "max_results": 10})
+            content = (result.get("content") or [{}])[0]
+            text_payload = content.get("text", "")
+            output_size = len(text_payload.encode("utf-8"))
+
+            run_post_tool_use(
+                self.repository,
+                session_id=session_id,
+                task_id=task_id,
+                role=self.role,
+                tool_name="x.search_posts_recent",
+                decision=decision.decision,
+                success=0 if result.get("isError") else 1,
+                output_size=output_size,
+            )
+
+            if result.get("isError"):
+                raise RuntimeError(f"x.search_posts_recent failed for query {query!r}: {text_payload}")
+
+            posts = json.loads(text_payload or "{}").get("posts") or []
+            reviewed_posts += len(posts)
+            if not posts:
+                continue
+
+            best_post = None
+            best_score = -1
+            for post in posts:
+                engagement = post.get("engagement") or {}
+                score = int(engagement.get("like_count") or 0) + int(engagement.get("repost_count") or 0)
+                if score > best_score:
+                    best_score = score
+                    best_post = post
+
+            text_redacted = (best_post.get("text_redacted") or "").strip()
+            collapsed = " ".join(text_redacted.split())
+            what_happened = (collapsed[:200] if collapsed else "(no text)") + " (via X signal)"
+            post_url = best_post.get("url") or ""
+            urls = best_post.get("urls") or []
+            # X posts are signals, never evidence: only a genuine external URL
+            # from the post counts as evidence_url; otherwise leave it empty so
+            # downstream rendering marks it as unverified rather than pointing
+            # back at the X post itself.
+            evidence_url = urls[0] if urls else ""
+
+            items.append(
+                TopicDigestItem(
+                    topic=query,
+                    what_happened=what_happened,
+                    why_it_matters="X で観測されたシグナル(自動収集、要ファクトチェック)",
+                    evidence_url=evidence_url,
+                    x_signal_url=post_url,
+                    follow_up="収集シグナルの一次情報を確認する",
+                )
+            )
+
+        if not items:
+            raise RuntimeError("no X signals collected")
+
+        fetched_urls = sum(1 for item in items if item.evidence_url)
+        return items, reviewed_posts, fetched_urls
 
     def _collect_mock_topics(self, *, session_id: str, task_id: str, queries: list[str]) -> list[TopicDigestItem]:
         for query in queries[:3]:

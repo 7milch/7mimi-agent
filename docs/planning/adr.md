@@ -91,3 +91,9 @@ Reason: ADR-012 の Go 化対象は reverse-proxy 型の境界サービス(claud
 Decision: 実行 model は `config/policy.yaml` の `model_policy.default_model`(既定: `claude-sonnet-5`)と `config/roles.yaml` の role 別 `model:` フィールド(role.model > default_model の優先順)で決定し、agent-runner コンテナへは `ANTHROPIC_MODEL` 環境変数として注入する(Claude Code は標準でこの env を respect する)。claude-proxy での model 強制(拒否・書き換え)は行わない。`model_policy.known_models` にない model 名は config validate 時に warning のみ。claude-smoke は診断用途のため model_policy を経由せず、CLI 既定 `claude-haiku-4-5`(`--model` で上書き可)とする。
 
 Reason: claude-smoke が model 未指定で Claude Code の既定(Opus 系)により想定外のコストが発生した。目的は「意図しない高コスト model の使用防止」であり、明示的な Opus 利用(Skill 等)は許容したいため、proxy でのハード強制ではなく config 駆動のソフト制御を選ぶ。model 名は credential ではないため env allowlist への追加はセキュリティ境界(ADR-010/012/013)に影響しない。
+
+### ADR-017: daily digest の実データ収集は X_MCP_URL による opt-in とする
+
+Decision: `AiItTopicRunner` の収集は環境変数 `X_MCP_URL` が設定されている場合のみ x-mcp-readonly(MCP `tools/call` `x.search_posts_recent`)による実データ収集を行い、未設定時は従来の mock 収集を維持する。digest 項目は LLM を使わず正規化ポストから決定的に構築する(topic=クエリ、engagement 最大のポストを代表シグナルとする、X post は signal であり evidence としない原則を維持)。クエリは最大3件・max_results 10 でコストを抑制する。
+
+Reason: 実 X API は Pay Per Use の課金対象であり、dry-run・テスト・CI をコストゼロで保つには env 駆動の opt-in が適切(AUTH_PROXY_URL と同じパターン)。LLM 要約は claude-proxy 経由の実行基盤が role 実行に接続されてから導入する。

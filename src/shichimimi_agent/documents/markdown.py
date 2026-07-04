@@ -47,13 +47,14 @@ def render_ai_it_daily_digest(*, queries: list[str], items: list[TopicDigestItem
 
     lines.extend(["", "## Top Topics", ""])
     for idx, item in enumerate(items, 1):
+        primary_source = item.evidence_url if item.evidence_url else "(未確認 — 要ファクトチェック)"
         lines.extend([
             f"### {idx}. {item.topic}",
             "",
             f"- What happened: {item.what_happened}",
             f"- Why it matters: {item.why_it_matters}",
             "- Evidence:",
-            f"  - Official / primary source: {item.evidence_url}",
+            f"  - Official / primary source: {primary_source}",
             "  - Supporting source: TBD",
             "- X signal:",
             f"  - Post URL: {item.x_signal_url}",
@@ -69,6 +70,8 @@ def render_ai_it_daily_digest(*, queries: list[str], items: list[TopicDigestItem
         "|---|---|---|---|",
     ])
     for item in items:
+        if not item.evidence_url:
+            continue
         lines.append(f"| {item.topic} | {item.evidence_url} | primary_or_project | {item.why_it_matters} |")
 
     lines.extend([
