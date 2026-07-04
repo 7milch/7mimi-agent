@@ -70,7 +70,7 @@
 - [ ] role definitions
 - [ ] mock claude-proxy
 - [ ] mock auth-proxy
-- [ ] X MCP read-only connection test
+- [x] X MCP read-only connection test
 - [ ] J-Quants MCP connection test
 - [ ] manual command: `research stock 7011`
 - [ ] manual command: `collect x ai-agent`
