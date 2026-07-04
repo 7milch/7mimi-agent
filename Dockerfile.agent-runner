@@ -24,4 +24,4 @@ RUN pip install --upgrade pip \
 WORKDIR /workspace
 
 ENTRYPOINT []
-CMD ["python", "-m", "sevenmimi_agent", "config", "validate"]
+CMD ["python", "-m", "shichimimi_agent", "config", "validate"]

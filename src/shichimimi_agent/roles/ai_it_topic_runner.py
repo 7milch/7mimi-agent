@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sevenmimi_agent.config.loader import AppConfig
-from sevenmimi_agent.db.repository import Repository
-from sevenmimi_agent.documents.markdown import TopicDigestItem, render_ai_it_daily_digest
-from sevenmimi_agent.documents.repository_writer import DocumentRepositoryWriter
-from sevenmimi_agent.hooks.post_tool_use import run_post_tool_use
-from sevenmimi_agent.hooks.pre_tool_use import PreToolUseInput, run_pre_tool_use
-from sevenmimi_agent.security.policy_engine import PolicyEngine
-from sevenmimi_agent.util.time import now_jst
+from shichimimi_agent.config.loader import AppConfig
+from shichimimi_agent.db.repository import Repository
+from shichimimi_agent.documents.markdown import TopicDigestItem, render_ai_it_daily_digest
+from shichimimi_agent.documents.repository_writer import DocumentRepositoryWriter
+from shichimimi_agent.hooks.post_tool_use import run_post_tool_use
+from shichimimi_agent.hooks.pre_tool_use import PreToolUseInput, run_pre_tool_use
+from shichimimi_agent.security.policy_engine import PolicyEngine
+from shichimimi_agent.util.time import now_jst
 
 
 @dataclass(frozen=True)

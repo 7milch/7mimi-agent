@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-from sevenmimi_agent.security.policy_engine import PolicyDecision, PolicyEngine
+from shichimimi_agent.security.policy_engine import PolicyDecision, PolicyEngine
 
 
 @dataclass(frozen=True)

@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from sevenmimi_agent.config import load_config, validate_config
-from sevenmimi_agent.security import PolicyEngine, is_path_allowed
+from shichimimi_agent.config import load_config, validate_config
+from shichimimi_agent.security import PolicyEngine, is_path_allowed
 
 
 class FoundationTest(unittest.TestCase):

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from sevenmimi_agent.config import load_config
-from sevenmimi_agent.proxies import AuthProxyClient
-from sevenmimi_agent.security import PolicyEngine
+from shichimimi_agent.config import load_config
+from shichimimi_agent.proxies import AuthProxyClient
+from shichimimi_agent.security import PolicyEngine
 
 
 class AuthProxyClientTest(unittest.TestCase):

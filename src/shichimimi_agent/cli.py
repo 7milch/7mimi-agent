@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from sevenmimi_agent.config import load_config, validate_config
-from sevenmimi_agent.db import Repository, default_db_path, migrate
-from sevenmimi_agent.runner import ContainerRunnerBackend, ContainerRunnerOptions, LocalRunnerBackend, RunnerTask, execute_runner_task
-from sevenmimi_agent.sessions.workspace import create_workspace
+from shichimimi_agent.config import load_config, validate_config
+from shichimimi_agent.db import Repository, default_db_path, migrate
+from shichimimi_agent.runner import ContainerRunnerBackend, ContainerRunnerOptions, LocalRunnerBackend, RunnerTask, execute_runner_task
+from shichimimi_agent.sessions.workspace import create_workspace
 
 
 def _print_validation(result: Any) -> int:
@@ -128,7 +128,7 @@ def cmd_runner_execute(args: argparse.Namespace) -> int:
 
 def cmd_claude_smoke(args: argparse.Namespace) -> int:
     """ADR-013 diagnostic: Claude Code inside agent-runner via claude-proxy."""
-    from sevenmimi_agent.runner.claude_smoke import (
+    from shichimimi_agent.runner.claude_smoke import (
         DEFAULT_PROMPT,
         ClaudeSmokeOptions,
         run_claude_smoke,
@@ -168,7 +168,7 @@ def cmd_research_stock(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="sevenmimi-agent")
+    parser = argparse.ArgumentParser(prog="shichimimi-agent")
     parser.add_argument("--root", help="project root", default=None)
     sub = parser.add_subparsers(dest="command", required=True)
 

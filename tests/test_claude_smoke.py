@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sevenmimi_agent.runner.claude_smoke import ClaudeSmokeOptions, build_docker_command
+from shichimimi_agent.runner.claude_smoke import ClaudeSmokeOptions, build_docker_command
 
 
 class ClaudeSmokeCommandTest(unittest.TestCase):

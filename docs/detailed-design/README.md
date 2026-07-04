@@ -40,7 +40,7 @@
     policy.yaml
     schedules.yaml
   src/
-    sevenmimi_agent/
+    shichimimi_agent/
       __init__.py
       __main__.py
       cli.py
@@ -160,7 +160,7 @@
 MVPでは、全コンポーネントを単一host上のlocal processとして扱う。ただし境界はコード上で分離する。
 
 ```text
-python -m sevenmimi_agent run ai-it-daily-digest
+python -m shichimimi_agent run ai-it-daily-digest
   ↓
 orchestrator
   ↓
@@ -672,7 +672,7 @@ ContainerRunnerBackend
   ↓
 docker run --rm 7mimi-agent-runner:latest
   ↓
-python -m sevenmimi_agent runner-execute ...
+python -m shichimimi_agent runner-execute ...
 ```
 
 Runtime behavior:
@@ -1519,13 +1519,13 @@ Expected result:
 Initial CLI commands:
 
 ```bash
-python -m sevenmimi_agent config validate
-python -m sevenmimi_agent schedule list
-python -m sevenmimi_agent run-job ai-it-x-daily-digest --dry-run
-python -m sevenmimi_agent run-job ai-it-x-daily-digest
-python -m sevenmimi_agent research-stock 7011 --dry-run
-python -m sevenmimi_agent db init
-python -m sevenmimi_agent db migrate
+python -m shichimimi_agent config validate
+python -m shichimimi_agent schedule list
+python -m shichimimi_agent run-job ai-it-x-daily-digest --dry-run
+python -m shichimimi_agent run-job ai-it-x-daily-digest
+python -m shichimimi_agent research-stock 7011 --dry-run
+python -m shichimimi_agent db init
+python -m shichimimi_agent db migrate
 ```
 
 Dry-run mode:
@@ -1634,7 +1634,7 @@ Target layout:
 ```text
 7mimi-agent/
   pyproject.toml
-  src/sevenmimi_agent/
+  src/shichimimi_agent/
     ...
 
   services/
@@ -1766,7 +1766,7 @@ AuthProxyClient:
 診断用 CLI `claude-smoke` で、agent-runner コンテナ内の Claude Code が claude-proxy 経由で小タスクを自律実行できることを確認する。
 
 ```text
-sevenmimi_agent claude-smoke [--runner container] [--prompt "..."]
+shichimimi_agent claude-smoke [--runner container] [--prompt "..."]
   1. session/workspace を作成
   2. agent-runner コンテナを bridge network で起動
   3. コンテナ内で claude -p <prompt> を実行

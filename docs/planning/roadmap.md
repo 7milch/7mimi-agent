@@ -19,7 +19,7 @@
     detailed-design/          # implementation-level design
     planning/                 # roadmap / ADR / open questions
   src/                        # Python package
-    sevenmimi_agent/
+    shichimimi_agent/
       orchestrator/
       runner/
       proxies/                # Python clients for Go proxy services

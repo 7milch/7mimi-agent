@@ -8,19 +8,19 @@ All commands run from the repository root with `PYTHONPATH=src`:
 
 ```bash
 # Validate config/*.yaml consistency
-PYTHONPATH=src python3 -m sevenmimi_agent config validate
+PYTHONPATH=src python3 -m shichimimi_agent config validate
 
 # Initialize / migrate SQLite DB (.data/normalized/app.sqlite)
-PYTHONPATH=src python3 -m sevenmimi_agent db init
+PYTHONPATH=src python3 -m shichimimi_agent db init
 
 # List scheduled jobs from config/schedules.yaml
-PYTHONPATH=src python3 -m sevenmimi_agent schedule list
+PYTHONPATH=src python3 -m shichimimi_agent schedule list
 
 # Run a job (dry-run output goes to .data/dry-run/, gitignored)
-PYTHONPATH=src python3 -m sevenmimi_agent run-job ai-it-x-daily-digest --dry-run
+PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-run
 
 # Run the same job inside the isolated Docker container runner
-PYTHONPATH=src python3 -m sevenmimi_agent run-job ai-it-x-daily-digest --dry-run --runner container
+PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-run --runner container
 
 # Build the agent-runner container image
 docker build -f Dockerfile.agent-runner -t 7mimi-agent-runner:latest .
@@ -65,7 +65,7 @@ Both paths converge on `execute_runner_task`, which currently only supports `ai_
 
 ### Security boundary (central design invariant)
 
-- Polyglot split (ADR-012): Python owns orchestration/scheduler/research/Markdown generation; **Go owns the proxy boundary services** in `services/claude-proxy` (Claude API reverse proxy, credential injection, audit) and `services/auth-proxy` (`POST /v1/tool/authorize`, role/tool allowlist). `sevenmimi_agent/proxies/` holds the Python clients — `AuthProxyClient` is fail-closed when `AUTH_PROXY_URL` is set but unreachable, and only falls back to the local `PolicyEngine` in local/dev mode (no `AUTH_PROXY_URL`).
+- Polyglot split (ADR-012): Python owns orchestration/scheduler/research/Markdown generation; **Go owns the proxy boundary services** in `services/claude-proxy` (Claude API reverse proxy, credential injection, audit) and `services/auth-proxy` (`POST /v1/tool/authorize`, role/tool allowlist). `shichimimi_agent/proxies/` holds the Python clients — `AuthProxyClient` is fail-closed when `AUTH_PROXY_URL` is set but unreachable, and only falls back to the local `PolicyEngine` in local/dev mode (no `AUTH_PROXY_URL`).
 - agent-runner never holds real credentials. `ANTHROPIC_API_KEY` belongs to claude-proxy only; X/J-Quants/GitHub creds belong to auth-proxy/MCP servers. Never mount these into runner containers. Proxies log metadata only — never credentials or request bodies.
 - Every tool call passes through the hook boundary: `hooks/pre_tool_use.py` (fail-**closed**, blocks via `security/policy_engine.py` role/tool/path checks) and `hooks/post_tool_use.py` (fail-**open**, best-effort audit to SQLite).
 - `security/path_policy.py` enforces the allowed/denied path globs from `document_repositories` in policy.yaml (e.g. no writes to `.github/**`, `.env`, `secrets/**` in the notes repo).

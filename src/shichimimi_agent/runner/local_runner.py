@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from sevenmimi_agent.config.loader import AppConfig
-from sevenmimi_agent.db.repository import Repository
+from shichimimi_agent.config.loader import AppConfig
+from shichimimi_agent.db.repository import Repository
 
 from .backend import RunnerBackend, RunnerExecutionResult, RunnerTask, execute_runner_task
 

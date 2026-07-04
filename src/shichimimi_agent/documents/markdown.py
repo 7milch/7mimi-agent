@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sevenmimi_agent.util.time import iso_now, now_jst
+from shichimimi_agent.util.time import iso_now, now_jst
 
 
 @dataclass(frozen=True)

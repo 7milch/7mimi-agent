@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from typing import Any
 
-from sevenmimi_agent.security.path_policy import is_path_allowed
+from shichimimi_agent.security.path_policy import is_path_allowed
 
 
 @dataclass(frozen=True)

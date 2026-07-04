@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from sevenmimi_agent.config.loader import AppConfig
-from sevenmimi_agent.db.repository import Repository
-from sevenmimi_agent.security.policy_engine import PolicyEngine
+from shichimimi_agent.config.loader import AppConfig
+from shichimimi_agent.db.repository import Repository
+from shichimimi_agent.security.policy_engine import PolicyEngine
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def execute_runner_task(*, config: AppConfig, repository: Repository, task: Runn
     if task.role != "ai_it_topic_runner":
         raise NotImplementedError(f"runner currently supports ai_it_topic_runner only, got {task.role}")
 
-    from sevenmimi_agent.roles.ai_it_topic_runner import AiItTopicRunner
+    from shichimimi_agent.roles.ai_it_topic_runner import AiItTopicRunner
 
     runner = AiItTopicRunner(config=config, repository=repository, policy_engine=PolicyEngine(config.policy))
     result = runner.run_daily_digest(session_id=task.session_id, task_id=task.task_id, job=task.job, dry_run=task.dry_run)

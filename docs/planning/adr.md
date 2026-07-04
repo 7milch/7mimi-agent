@@ -73,3 +73,9 @@ Reason: These proxies are security-sensitive network boundary components. Go is 
 Decision: agent-runner コンテナに Claude Code CLI(Node.js + `@anthropic-ai/claude-code`)をインストールし、LLM 通信は環境変数(`ANTHROPIC_BASE_URL` → claude-proxy、`ANTHROPIC_AUTH_TOKEN` = session token、`ANTHROPIC_CUSTOM_HEADERS` = `X-7mimi-Session-Id` / `X-7mimi-Role`)で claude-proxy に向ける。claude-proxy は `/v1/messages` 系エンドポイント(`count_tokens` 含む)を pass-through する。container runner の既定は `--network none` のまま維持し、Claude 実行時のみ明示的に bridge ネットワークへ opt-in する。
 
 Reason: ADR-010 の「Claude Code process と workspace は agent-runner に置き、provider credential は claude-proxy に置く」構成を実際に動く形にするため。Claude Code は標準環境変数で base URL / Bearer token / 追加ヘッダを差し替えられるため、コード改変なしで credential boundary を通せる。ネットワークは既定 deny(none)を保ち、必要なジョブだけ opt-in することで isolation の原則を崩さない。
+
+### ADR-014: Rename Python package sevenmimi_agent to shichimimi_agent
+
+Decision: Python パッケージ名を `sevenmimi_agent` から `shichimimi_agent` へ、配布名/console script/argparse prog を `sevenmimi-agent` から `shichimimi-agent` へ統一する。Docker イメージ名(`7mimi-agent-runner` など)、Go サービス(services/)、`X-7mimi-*` ヘッダ、リポジトリ名は 7mimi ブランドのまま変更しない。
+
+Reason: プロジェクト名 7mimi の読みは「しちみみ」(shichi-mimi)であり、Python パッケージだけが英語読み(seven)になっていた命名の不整合を解消するため。7mimi 表記自体はブランドとしてイメージ名・ヘッダ・サービス名に残す。

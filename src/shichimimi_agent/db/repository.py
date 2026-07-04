@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sevenmimi_agent.util.ids import new_id
-from sevenmimi_agent.util.time import iso_now
+from shichimimi_agent.util.ids import new_id
+from shichimimi_agent.util.time import iso_now
 
 from .migrations import connect, default_db_path
 

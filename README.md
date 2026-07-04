@@ -21,17 +21,17 @@ The first implementation slice provides:
 - redaction and path policy helpers
 - AI/IT daily digest dry-run runner using mock signals
 - Go proxy boundary services (`services/claude-proxy`, `services/auth-proxy`) MVP
-- Python proxy clients (`sevenmimi_agent.proxies`) with local policy fallback
+- Python proxy clients (`shichimimi_agent.proxies`) with local policy fallback
 
 ## Development commands
 
 Run commands from the repository root:
 
 ```bash
-PYTHONPATH=src python3 -m sevenmimi_agent config validate
-PYTHONPATH=src python3 -m sevenmimi_agent db init
-PYTHONPATH=src python3 -m sevenmimi_agent schedule list
-PYTHONPATH=src python3 -m sevenmimi_agent run-job ai-it-x-daily-digest --dry-run
+PYTHONPATH=src python3 -m shichimimi_agent config validate
+PYTHONPATH=src python3 -m shichimimi_agent db init
+PYTHONPATH=src python3 -m shichimimi_agent schedule list
+PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-run
 ```
 
 Dry-run output is written under `.data/dry-run/` and is gitignored.
@@ -53,7 +53,7 @@ docker build -f Dockerfile.agent-runner -t 7mimi-agent-runner:latest .
 Run the AI/IT daily digest job inside an isolated `agent-runner` container:
 
 ```bash
-PYTHONPATH=src python3 -m sevenmimi_agent run-job ai-it-x-daily-digest --dry-run --runner container
+PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-run --runner container
 ```
 
 The container runner mounts the repository at `/workspace`, writes dry-run output under `.data/dry-run/`, and does not receive provider/API credentials such as `ANTHROPIC_API_KEY`, X credentials, J-Quants credentials, or GitHub tokens.
@@ -97,7 +97,7 @@ cd services/claude-proxy && ANTHROPIC_API_KEY=sk-ant-... go run ./cmd/claude-pro
 
 # 2. rebuild the runner image, then run the smoke test from the repo root
 docker build -f Dockerfile.agent-runner -t 7mimi-agent-runner:latest .
-PYTHONPATH=src python3 -m sevenmimi_agent claude-smoke
+PYTHONPATH=src python3 -m shichimimi_agent claude-smoke
 ```
 
 The default task asks Claude to write `hello.md` in the session workspace (`.sessions/<session>/workspace/`). Use `--prompt` to override.

@@ -61,7 +61,7 @@ class ContainerRunnerBackend(RunnerBackend):
             self.options.image,
             "python",
             "-m",
-            "sevenmimi_agent",
+            "shichimimi_agent",
             "runner-execute",
             task.job_name,
             "--session-id",

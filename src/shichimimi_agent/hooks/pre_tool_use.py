@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sevenmimi_agent.security.policy_engine import PolicyDecision, PolicyEngine
+from shichimimi_agent.security.policy_engine import PolicyDecision, PolicyEngine
 
 
 @dataclass(frozen=True)
