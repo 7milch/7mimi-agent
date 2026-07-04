@@ -1621,3 +1621,142 @@ Dry-run mode:
 - PostToolUse fail-open is tested
 - agent-runner has no provider/external credentials
 - claude-proxy/auth-proxy boundaries are represented in code interfaces
+
+
+---
+
+### 21.25 Go proxy services detailed design
+
+`claude-proxy` と `auth-proxy` は Go service として実装する。Python は orchestration / scheduler / runner management / research workflow / Markdown generation を担当し、Go は security-sensitive network boundary を担当する。
+
+Target layout:
+
+```text
+7mimi-agent/
+  pyproject.toml
+  src/sevenmimi_agent/
+    ...
+
+  services/
+    claude-proxy/
+      go.mod
+      Dockerfile
+      cmd/
+        claude-proxy/
+          main.go
+      internal/
+        config/
+        proxy/
+        auth/
+        audit/
+        ratelimit/
+
+    auth-proxy/
+      go.mod
+      Dockerfile
+      cmd/
+        auth-proxy/
+          main.go
+      internal/
+        config/
+        policy/
+        tools/
+        audit/
+        ratelimit/
+```
+
+#### 21.25.1 claude-proxy Go MVP
+
+`claude-proxy` is a Claude API proxy, not a Claude Code runner.
+
+MVP responsibilities:
+
+- Go HTTP server
+- `GET /healthz`
+- `POST /v1/messages`
+- validate `Authorization: Bearer <session token>`
+- require `X-7mimi-Session-Id`
+- require `X-7mimi-Role`
+- inject `x-api-key` from `ANTHROPIC_API_KEY`
+- ensure `anthropic-version` header exists
+- forward request to `ANTHROPIC_BASE_URL`
+- stream/copy response back to caller
+- write JSON audit log to stdout
+
+Environment variables:
+
+```text
+CLAUDE_PROXY_ADDR=:18080
+ANTHROPIC_API_KEY=...
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+CLAUDE_PROXY_DEV_TOKEN=cp_sess_dev
+```
+
+Audit log metadata only:
+
+```text
+timestamp
+session_id
+role
+method
+path
+upstream_status
+duration_ms
+```
+
+The proxy must not log `ANTHROPIC_API_KEY` or full request/response body by default.
+
+#### 21.25.2 auth-proxy Go MVP
+
+`auth-proxy` is an external tool/API credential boundary.
+
+MVP responsibilities:
+
+- Go HTTP server
+- `GET /healthz`
+- `POST /v1/tool/authorize`
+- validate `role`, `tool_name`, and `arguments`
+- return allow/block decision
+- write JSON audit log to stdout
+
+MVP policy can be embedded dev policy and does not need full YAML compatibility.
+
+`ai_it_topic_runner` allow:
+
+```text
+x.search_posts_recent
+x.get_posts
+x.get_users
+x.get_users_by_username
+web.fetch_url
+web.extract_article
+document.write_markdown
+document.commit_and_push_markdown_repo
+```
+
+`ai_it_topic_runner` deny:
+
+```text
+x.create_post
+x.like_post
+x.repost
+x.follow_user
+x.send_dm
+jquants.*
+trading.*
+document.write_outside_workspace
+document.delete_recursive
+```
+
+#### 21.25.3 Python adapter plan
+
+Python keeps local policy fallback for local development.
+
+```text
+ClaudeProxyClient:
+  future Claude runner wrapper calls CLAUDE_PROXY_URL
+
+AuthProxyClient:
+  PreToolUse can call auth-proxy /v1/tool/authorize
+  local/dev mode may fall back to local PolicyEngine
+```

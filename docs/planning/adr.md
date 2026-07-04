@@ -60,3 +60,10 @@ Decision: X由来のAI/IT topic digestやtopic notesは、agent本体のreposito
 Reason: agent system と生成 knowledge を分離し、Git履歴をそのまま knowledge base の更新履歴として扱うため。書き込み権限は document-store / auth-proxy 側に閉じ込め、許可pathを `daily/**`, `weekly/**`, `topics/**`, `queue/**` に限定する。
 
 ---
+
+
+### ADR-012: Implement proxy boundary services in Go
+
+Decision: Implement `claude-proxy` and `auth-proxy` as Go services, while keeping agent orchestration and research logic in Python.
+
+Reason: These proxies are security-sensitive network boundary components. Go is better suited for HTTP reverse proxying, streaming/SSE, concurrency, small static binaries, and container deployment. Python remains better for agent orchestration, data processing, research workflows, and Markdown generation.

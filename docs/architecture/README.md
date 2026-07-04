@@ -97,15 +97,18 @@ agent-runner:
   - tool call を auth-proxy に向ける
 
 claude-proxy:
+  - Go serviceとして実装する
   - Claude API credential boundary / API proxy
   - Anthropic / Claude API への通信を中継する
   - ANTHROPIC_API_KEY 等の provider credential を保持する
   - usage / budget / audit / session attribution を担当する
+  - streaming / SSE pass-through に対応する
   - Claude Code process は持たない
   - session workspace は持たない
   - 外部API credential は持たない
 
 auth-proxy:
+  - Go serviceとして実装する
   - MCP tool / external API credential boundary
   - X / J-Quants / Web / Document Store などへの tool call を認可する
   - role別 tool allowlist / denylist を適用する
@@ -130,6 +133,36 @@ X / J-Quants / Document Store credential:
 agent-runner:
   Claude provider credential も外部API credential も持たない
 ```
+
+
+### 6.1.2 Implementation language boundary
+
+`7mimi-agent` は polyglot 構成にする。
+
+```text
+Python:
+  - agent orchestration
+  - scheduler
+  - runner management
+  - research logic
+  - markdown/document generation
+  - config validation
+  - local development CLI
+
+Go:
+  - claude-proxy
+  - auth-proxy
+  - security-sensitive network boundary components
+```
+
+Go を proxy に使う理由:
+
+- streaming-friendly HTTP reverse proxy を実装しやすい
+- standalone binary として配布しやすい
+- concurrency / timeout / cancellation を扱いやすい
+- container 化しやすい
+- audit / rate-limit middleware を小さく保てる
+- credential boundary を Python の agent runtime から明確に分離できる
 
 ### 6.2 Session lifecycle
 

@@ -20,6 +20,8 @@ The first implementation slice provides:
 - deterministic policy engine skeleton
 - redaction and path policy helpers
 - AI/IT daily digest dry-run runner using mock signals
+- Go proxy boundary services (`services/claude-proxy`, `services/auth-proxy`) MVP
+- Python proxy clients (`sevenmimi_agent.proxies`) with local policy fallback
 
 ## Development commands
 
@@ -57,3 +59,30 @@ PYTHONPATH=src python3 -m sevenmimi_agent run-job ai-it-x-daily-digest --dry-run
 The container runner mounts the repository at `/workspace`, writes dry-run output under `.data/dry-run/`, and does not receive provider/API credentials such as `ANTHROPIC_API_KEY`, X credentials, J-Quants credentials, or GitHub tokens.
 
 By default the container runner uses `--network none` for the current mock/dry-run flow. Future real MCP/proxy integrations can opt into an explicit Docker network.
+
+## Go proxy services
+
+`claude-proxy` and `auth-proxy` are implemented in Go (see ADR-012). They form the security-sensitive network boundary: claude-proxy owns `ANTHROPIC_API_KEY`, auth-proxy owns tool authorization and external API credentials. Python keeps orchestration, research logic, and document generation.
+
+Run Go tests:
+
+```bash
+cd services/claude-proxy && go test ./...
+cd services/auth-proxy && go test ./...
+```
+
+Build container images:
+
+```bash
+docker build -f services/claude-proxy/Dockerfile -t 7mimi-claude-proxy:latest services/claude-proxy
+docker build -f services/auth-proxy/Dockerfile -t 7mimi-auth-proxy:latest services/auth-proxy
+```
+
+Run locally:
+
+```bash
+# from services/claude-proxy (listens on :18080)
+ANTHROPIC_API_KEY=... go run ./cmd/claude-proxy
+# from services/auth-proxy (listens on :18081)
+go run ./cmd/auth-proxy
+```

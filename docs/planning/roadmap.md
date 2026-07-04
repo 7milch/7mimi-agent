@@ -18,15 +18,25 @@
     workflows/                # data model / jobs / output design
     detailed-design/          # implementation-level design
     planning/                 # roadmap / ADR / open questions
-  src/                        # future Python package
+  src/                        # Python package
     sevenmimi_agent/
       orchestrator/
       runner/
-      claude_proxy/
-      auth_proxy/
+      proxies/                # Python clients for Go proxy services
       roles/
       mcp/
       metrics/
+  services/                   # Go boundary services
+    claude-proxy/
+      go.mod
+      Dockerfile
+      cmd/claude-proxy/main.go
+      internal/{config,proxy,auth,audit,ratelimit}/
+    auth-proxy/
+      go.mod
+      Dockerfile
+      cmd/auth-proxy/main.go
+      internal/{config,policy,tools,audit,ratelimit}/
   config/
     roles.yaml                # role definitions
     policy.yaml               # deterministic platform policy
@@ -123,3 +133,18 @@
 8. AI/IT daily digest を `nishiog/ai-it-research-notes` にpushする縦切りを作る
 
 ---
+
+
+### Phase G1: Go proxy MVPs
+
+- [ ] `services/claude-proxy` Go HTTP service
+- [ ] `GET /healthz`
+- [ ] `POST /v1/messages`
+- [ ] provider credential injection
+- [ ] streaming/copy response pass-through
+- [ ] audit metadata log
+- [ ] `services/auth-proxy` Go HTTP service
+- [ ] `POST /v1/tool/authorize`
+- [ ] embedded dev policy for `ai_it_topic_runner`
+- [ ] Go tests
+- [ ] Dockerfiles for both proxy services
