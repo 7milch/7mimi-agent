@@ -31,7 +31,10 @@ func NewHandler(cfg *config.Config, logger *audit.Logger) *Handler {
 func (h *Handler) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
+	// Claude Code also calls /v1/messages/count_tokens (and may add more
+	// /v1/messages/* endpoints); all share the same validation/injection.
 	mux.HandleFunc("POST /v1/messages", h.handleMessages)
+	mux.HandleFunc("POST /v1/messages/", h.handleMessages)
 	return mux
 }
 
@@ -73,7 +76,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstreamURL := strings.TrimRight(h.cfg.AnthropicBaseURL, "/") + "/v1/messages"
+	upstreamURL := strings.TrimRight(h.cfg.AnthropicBaseURL, "/") + r.URL.Path
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, r.Body)
 	if err != nil {
 		deny(http.StatusInternalServerError, "failed to build upstream request")

@@ -116,3 +116,30 @@ func TestForwardsWithAPIKeyInjectedAndAuditHasNoSecret(t *testing.T) {
 		t.Fatal("audit log contains request body content")
 	}
 }
+
+func TestCountTokensPassthrough(t *testing.T) {
+	var upstreamPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPath = r.URL.Path
+		if r.Header.Get("x-api-key") != testAPIKey {
+			t.Error("x-api-key not injected on count_tokens")
+		}
+		w.Write([]byte(`{"input_tokens":42}`))
+	}))
+	defer upstream.Close()
+
+	h := newTestHandler(upstream.URL, io.Discard)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer cp_sess_dev")
+	req.Header.Set("X-7mimi-Session-Id", "sess_dev")
+	req.Header.Set("X-7mimi-Role", "ai_it_topic_runner")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if upstreamPath != "/v1/messages/count_tokens" {
+		t.Fatalf("upstream path = %q, want /v1/messages/count_tokens", upstreamPath)
+	}
+}

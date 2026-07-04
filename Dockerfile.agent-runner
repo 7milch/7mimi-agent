@@ -7,6 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Claude Code CLI (ADR-013). It talks to claude-proxy via ANTHROPIC_BASE_URL /
+# ANTHROPIC_AUTH_TOKEN; this container never receives ANTHROPIC_API_KEY.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends nodejs npm git ca-certificates ripgrep \
+ && npm install -g @anthropic-ai/claude-code \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml README.md ./
 COPY src ./src
 

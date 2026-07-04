@@ -86,3 +86,18 @@ ANTHROPIC_API_KEY=... go run ./cmd/claude-proxy
 # from services/auth-proxy (listens on :18081)
 go run ./cmd/auth-proxy
 ```
+
+## Claude Code smoke test (ADR-013)
+
+The agent-runner image bundles Claude Code CLI. `claude-smoke` runs Claude inside an isolated container, pointed at claude-proxy via `ANTHROPIC_BASE_URL` — the container never sees `ANTHROPIC_API_KEY`.
+
+```bash
+# 1. start claude-proxy on the host (holds the real credential)
+cd services/claude-proxy && ANTHROPIC_API_KEY=sk-ant-... go run ./cmd/claude-proxy
+
+# 2. rebuild the runner image, then run the smoke test from the repo root
+docker build -f Dockerfile.agent-runner -t 7mimi-agent-runner:latest .
+PYTHONPATH=src python3 -m sevenmimi_agent claude-smoke
+```
+
+The default task asks Claude to write `hello.md` in the session workspace (`.sessions/<session>/workspace/`). Use `--prompt` to override.

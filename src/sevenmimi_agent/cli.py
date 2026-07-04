@@ -126,6 +126,41 @@ def cmd_runner_execute(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_claude_smoke(args: argparse.Namespace) -> int:
+    """ADR-013 diagnostic: Claude Code inside agent-runner via claude-proxy."""
+    from sevenmimi_agent.runner.claude_smoke import (
+        DEFAULT_PROMPT,
+        ClaudeSmokeOptions,
+        run_claude_smoke,
+        summarize_result,
+    )
+
+    try:
+        config = _load_validated_config(args.root)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    migrate(default_db_path(config.root))
+    repository = Repository.for_root(config.root)
+    role = "ai_it_topic_runner"
+    session_id = repository.create_session(source="claude-smoke", role=role, workspace_path="")
+    workspace = create_workspace(config.root, session_id)
+    repository.update_session_status(session_id, "running")
+
+    result = run_claude_smoke(
+        root=config.root,
+        session_id=session_id,
+        role=role,
+        workspace=workspace,
+        prompt=args.prompt or DEFAULT_PROMPT,
+        options=ClaudeSmokeOptions(image=args.image, network=args.network),
+    )
+    summary = summarize_result(result)
+    repository.update_session_status(session_id, "stopped" if result.exit_code == 0 else "failed")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0 if result.exit_code == 0 else 1
+
+
 def cmd_research_stock(args: argparse.Namespace) -> int:
     print("stock research runner is not implemented yet; planned for Phase D5")
     print(json.dumps({"ticker": args.ticker, "dry_run": args.dry_run, "status": "not_implemented"}, ensure_ascii=False, indent=2))
@@ -171,6 +206,12 @@ def build_parser() -> argparse.ArgumentParser:
     runner_execute.add_argument("--runner-root", default=None)
     runner_execute.add_argument("--dry-run", action="store_true", default=False)
     runner_execute.set_defaults(func=cmd_runner_execute)
+
+    claude_smoke = sub.add_parser("claude-smoke")
+    claude_smoke.add_argument("--prompt", default=None)
+    claude_smoke.add_argument("--image", default="7mimi-agent-runner:latest")
+    claude_smoke.add_argument("--network", default="bridge")
+    claude_smoke.set_defaults(func=cmd_claude_smoke)
 
     stock = sub.add_parser("research-stock")
     stock.add_argument("ticker")
