@@ -28,6 +28,54 @@ class FoundationTest(unittest.TestCase):
         self.assertTrue(allowed.allowed)
         self.assertFalse(denied.allowed)
 
+    def test_model_policy_present_and_valid(self) -> None:
+        result = validate_config(self.config)
+        self.assertEqual(result.errors, [])
+        model_policy = self.config.policy["model_policy"]
+        self.assertEqual(model_policy["default_model"], "claude-sonnet-5")
+        self.assertIn("claude-sonnet-5", model_policy["known_models"])
+
+    def test_unknown_model_name_is_warning_not_error(self) -> None:
+        import copy
+
+        from shichimimi_agent.config import validate_config as _validate
+
+        config = copy.deepcopy(self.config)
+        config.roles["roles"]["ai_it_topic_runner"]["model"] = "totally-unknown-model"
+        result = _validate(config)
+        self.assertEqual(result.errors, [])
+        self.assertTrue(any("totally-unknown-model" in w for w in result.warnings))
+
+    def test_empty_string_role_model_is_error(self) -> None:
+        import copy
+
+        from shichimimi_agent.config import validate_config as _validate
+
+        config = copy.deepcopy(self.config)
+        config.roles["roles"]["ai_it_topic_runner"]["model"] = ""
+        result = _validate(config)
+        self.assertTrue(any("model must be a non-empty string" in e for e in result.errors))
+
+    def test_missing_default_model_is_error(self) -> None:
+        import copy
+
+        from shichimimi_agent.config import validate_config as _validate
+
+        config = copy.deepcopy(self.config)
+        del config.policy["model_policy"]["default_model"]
+        result = _validate(config)
+        self.assertTrue(any("model_policy.default_model must be a non-empty string" in e for e in result.errors))
+
+    def test_missing_model_policy_section_is_error(self) -> None:
+        import copy
+
+        from shichimimi_agent.config import validate_config as _validate
+
+        config = copy.deepcopy(self.config)
+        del config.policy["model_policy"]
+        result = _validate(config)
+        self.assertTrue(any("model_policy.default_model must be a non-empty string" in e for e in result.errors))
+
 
 if __name__ == "__main__":
     unittest.main()

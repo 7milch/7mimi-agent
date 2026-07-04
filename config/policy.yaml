@@ -314,6 +314,17 @@ command_policy:
     - "npm\\s+publish"
     - "docker\\s+run\\s+.*--privileged"
 
+model_policy:
+  # Soft, config-driven model selection (ADR-016). Unknown model names only
+  # produce a validation warning, never a hard error.
+  default_model: claude-sonnet-5
+  known_models:
+    - claude-sonnet-5
+    - claude-haiku-4-5-20251001
+    - claude-haiku-4-5
+    - claude-opus-4-8
+    - claude-fable-5
+
 redaction_policy:
   enabled: true
   block_on_secret_like_output: true

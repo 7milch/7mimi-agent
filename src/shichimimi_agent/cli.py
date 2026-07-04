@@ -153,7 +153,7 @@ def cmd_claude_smoke(args: argparse.Namespace) -> int:
         role=role,
         workspace=workspace,
         prompt=args.prompt or DEFAULT_PROMPT,
-        options=ClaudeSmokeOptions(image=args.image, network=args.network),
+        options=ClaudeSmokeOptions(image=args.image, network=args.network, model=args.model),
     )
     summary = summarize_result(result)
     repository.update_session_status(session_id, "stopped" if result.exit_code == 0 else "failed")
@@ -292,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     claude_smoke.add_argument("--prompt", default=None)
     claude_smoke.add_argument("--image", default="7mimi-agent-runner:latest")
     claude_smoke.add_argument("--network", default="bridge")
+    claude_smoke.add_argument("--model", default="claude-haiku-4-5")
     claude_smoke.set_defaults(func=cmd_claude_smoke)
 
     mcp_x_readonly = sub.add_parser("mcp-x-readonly")

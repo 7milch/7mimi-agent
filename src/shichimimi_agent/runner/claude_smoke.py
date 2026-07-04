@@ -32,6 +32,10 @@ class ClaudeSmokeOptions:
     pids_limit: int = 256
     max_turns: int = 6
     timeout_seconds: int = 300
+    # ADR-016: claude-smoke is a cheap diagnostic and deliberately does not
+    # go through config/model_selection.resolve_model; default is the
+    # cheapest model to avoid unintended Opus-level cost.
+    model: str = "claude-haiku-4-5"
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,7 @@ def build_docker_command(
         "ANTHROPIC_BASE_URL": claude_proxy_url,
         "ANTHROPIC_AUTH_TOKEN": session_token,
         "ANTHROPIC_CUSTOM_HEADERS": f"X-7mimi-Session-Id: {session_id}\nX-7mimi-Role: {role}",
+        "ANTHROPIC_MODEL": options.model,
         # Keep Claude Code from writing config outside the workspace mount.
         "CLAUDE_CONFIG_DIR": f"/workspace/{workspace_rel}/.claude-config",
         "HOME": f"/workspace/{workspace_rel}",

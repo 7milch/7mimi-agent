@@ -83,4 +83,32 @@ def validate_config(config: AppConfig) -> ValidationResult:
         for denied in [".github/**", ".env", "secrets/**"]:
             result.require(denied in denied_paths, f"document repo {repo_name} denied_paths missing {denied}")
 
+    # ADR-016: model selection is config-driven and soft (warnings only).
+    model_policy = policy.get("model_policy") or {}
+    default_model = model_policy.get("default_model")
+    result.require(
+        isinstance(default_model, str) and bool(default_model),
+        "model_policy.default_model must be a non-empty string",
+    )
+    known_models = set(_as_list(model_policy.get("known_models")))
+    if isinstance(default_model, str) and default_model:
+        result.warn_if(
+            default_model not in known_models,
+            f"model_policy.default_model {default_model!r} not in model_policy.known_models",
+        )
+
+    for role_name, role in roles.items():
+        if "model" not in role:
+            continue
+        role_model = role.get("model")
+        result.require(
+            isinstance(role_model, str) and bool(role_model),
+            f"role {role_name} model must be a non-empty string",
+        )
+        if isinstance(role_model, str) and role_model:
+            result.warn_if(
+                role_model not in known_models,
+                f"role {role_name} model {role_model!r} not in model_policy.known_models",
+            )
+
     return result

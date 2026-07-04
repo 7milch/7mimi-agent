@@ -44,6 +44,24 @@ class ClaudeSmokeCommandTest(unittest.TestCase):
         self.assertIn("--max-turns", cmd)
         self.assertIn("--allowedTools", cmd)
 
+    def test_default_model_is_haiku(self) -> None:
+        cmd = self.build()
+        joined = " ".join(cmd)
+        self.assertIn("ANTHROPIC_MODEL=claude-haiku-4-5", joined)
+
+    def test_model_override_is_respected(self) -> None:
+        cmd = build_docker_command(
+            root=Path("/repo"),
+            session_id="sess_x",
+            role="ai_it_topic_runner",
+            workspace_rel=".sessions/sess_x/workspace",
+            prompt="do something small",
+            options=ClaudeSmokeOptions(model="claude-opus-4-8"),
+        )
+        joined = " ".join(cmd)
+        self.assertIn("ANTHROPIC_MODEL=claude-opus-4-8", joined)
+        self.assertNotIn("ANTHROPIC_MODEL=claude-haiku-4-5", joined)
+
 
 if __name__ == "__main__":
     unittest.main()

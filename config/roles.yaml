@@ -137,6 +137,7 @@ roles:
       XからAI/IT関連Topicを収集し、リンク先や一次情報を確認した上で、
       専用Markdown repositoryへdaily digest / topic notesを生成する。
       主対象はAI agent、MCP、Claude Code、Codex、developer tools、AI security。
+    model: claude-sonnet-5
     system_rules:
       - X投稿はsignalであり、evidenceとして扱わない。
       - X投稿本文の大量転載をしない。post URL / source URL / 要約を残す。
