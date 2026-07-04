@@ -2,6 +2,10 @@
 
 MCP-first autonomous research agent inspired by Mercari Engineering's remote-claude / pcp-agent architecture.
 
-Design is intentionally centralized in one document:
+Documentation starts here:
 
-- [docs/design.md](docs/design.md)
+- [docs/README.md](docs/README.md)
+
+Related generated notes repository:
+
+- https://github.com/nishiog/ai-it-research-notes

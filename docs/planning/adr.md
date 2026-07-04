@@ -1,0 +1,62 @@
+# Architecture Decision Records
+
+設計判断の履歴をまとめる。
+
+## 18. ADR: decisions so far
+
+### ADR-001: Single design document
+
+Decision: 設計は `docs/design.md` に集約する。  
+Reason: ドキュメントが散らばることを避けるため。
+
+### ADR-002: MCP-first architecture
+
+Decision: 外部サービス連携は原則 MCP 経由にする。  
+Reason: Agent runtime と API 実装・認証情報を分離しやすく、role-based policy を適用しやすいため。
+
+### ADR-003: X is signal, not evidence
+
+Decision: X情報は調査トリガーとして扱い、銘柄評価の根拠にはしない。  
+Reason: Xには噂、ノイズ、ポジショントーク、誤情報が混ざるため。
+
+### ADR-004: J-Quants MCP as primary stock data source
+
+Decision: 日本株の構造化データは J-Quants MCP を主たる取得口にする。  
+Reason: 契約済みであり、自律AgentからMCPとして扱いやすいため。
+
+### ADR-005: X MCP read-only in initial version
+
+Decision: 初期版では X MCP の write tool を無効化する。  
+Reason: 自律投稿・like・follow などは事故時の影響が大きく、human-in-the-loop が必要なため。
+
+### ADR-006: Start local, design for containers
+
+Decision: MVPは local runner で始めるが、設計は session-based container runner へ移行可能にする。  
+Reason: 最初からコンテナ管理を作り込むと重いため。ただしMercari blogの思想であるセッション隔離は将来の中核にする。
+
+### ADR-007: PreToolUse fail-closed, PostToolUse fail-open
+
+Decision: 危険操作を止める hook は fail-closed、計測 hook は fail-open。  
+Reason: セキュリティは安全側に倒し、計測は本体動作を妨げないため。
+
+### ADR-008: Python as initial implementation language
+
+Decision: 初期実装言語は Python とする。  
+Reason: データ収集、SQLite、金融データ処理、スケジューラー、バッチ実行との相性がよく、まず自律リサーチの縦切りを作るため。Bot/UI統合は後から追加する。
+
+### ADR-009: Config-first minimal platform policy
+
+Decision: role / policy / schedule は `config/roles.yaml`, `config/policy.yaml`, `config/schedules.yaml` に分離する。  
+Reason: 設計ドキュメントは1本に保ちつつ、実行時設定は機械可読なYAMLとして管理するため。
+
+### ADR-010: Split LLM credential proxy and tool auth proxy
+
+Decision: Claude API credential boundary を **claude-proxy**、外部tool/API側の認証・認可境界を **auth-proxy** と呼び、別コンポーネントとして扱う。  
+Reason: Claude provider credential と、X/J-Quants/Document Store 等の外部API credential を同じ実行面に置かないため。claude-proxy は Claude API への通信中継、provider credential、usage/budget/audit/session attribution を担当する。Claude Code process と workspace はセッションごとの agent-runner に置く。auth-proxy は MCP tool call の認可・監査・rate limit・secret分離を担当する。
+
+### ADR-011: Dedicated public repository for AI/IT generated notes
+
+Decision: X由来のAI/IT topic digestやtopic notesは、agent本体のrepositoryではなく `nishiog/ai-it-research-notes` に保存する。  
+Reason: agent system と生成 knowledge を分離し、Git履歴をそのまま knowledge base の更新履歴として扱うため。書き込み権限は document-store / auth-proxy 側に閉じ込め、許可pathを `daily/**`, `weekly/**`, `topics/**`, `queue/**` に限定する。
+
+---
