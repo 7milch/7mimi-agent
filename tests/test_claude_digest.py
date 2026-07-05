@@ -104,6 +104,41 @@ class CollectSignalsTest(unittest.TestCase):
         for entry in result["queries"]:
             self.assertEqual(len(entry["posts"]), 1)
 
+    def test_redactor_scrubs_secret_like_text_before_signals_json(self) -> None:
+        from shichimimi_agent.hooks.redaction import Redactor
+
+        queries = self._queries()
+        secret_post = _post("secret1")
+        secret_post["text_redacted"] = (
+            'check out this token Bearer abcDEF123.token here'
+        )
+        posts_by_query = {q: [secret_post] for q in queries}
+        fake_client = FakeMcpClient("http://x-mcp.local", posts_by_query=posts_by_query)
+        os.environ["X_MCP_URL"] = "http://x-mcp.local"
+        os.environ["X_MCP_SESSION_TOKEN"] = "test-x-mcp-session-token"
+
+        redactor = Redactor(self.config.policy.get("redaction_policy", {}).get("patterns") or [])
+        result = collect_signals(
+            auth_client=self.auth_client,
+            repository=self.repository,
+            session_id="sess1",
+            task_id="task1",
+            role="ai_it_topic_runner",
+            queries=queries,
+            mcp_client_factory=lambda base_url: fake_client,
+            redactor=redactor,
+        )
+
+        for entry in result["queries"]:
+            for post in entry["posts"]:
+                text = post["text_redacted"]
+                self.assertNotIn("Bearer abcDEF123", text)
+                self.assertIn("[REDACTED:bearer_token]", text)
+
+        # Round-trip through signals.json exactly like run_claude_digest does.
+        signals_json = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("Bearer abcDEF123", signals_json)
+
     def test_zero_posts_across_all_queries_raises(self) -> None:
         queries = self._queries()
         fake_client = FakeMcpClient("http://x-mcp.local", posts_by_query={})

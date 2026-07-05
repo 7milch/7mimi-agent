@@ -23,6 +23,7 @@ from shichimimi_agent.config.model_selection import resolve_model
 from shichimimi_agent.db.repository import Repository
 from shichimimi_agent.hooks.post_tool_use import run_post_tool_use
 from shichimimi_agent.hooks.pre_tool_use import PreToolUseInput, run_pre_tool_use
+from shichimimi_agent.hooks.redaction import Redactor
 from shichimimi_agent.mcp.client import McpHttpClient
 from shichimimi_agent.proxies.auth_proxy_client import AuthProxyClient
 from shichimimi_agent.runner.git_relay_env import build_git_relay_env
@@ -48,6 +49,7 @@ def collect_signals(
     role: str,
     queries: list[str],
     mcp_client_factory: Callable[[str], McpHttpClient] | None = None,
+    redactor: Redactor | None = None,
 ) -> dict[str, Any]:
     """Collect X signals for every query in the job's query set.
 
@@ -64,6 +66,14 @@ def collect_signals(
     Only an authorization deny aborts immediately (a deterministic policy
     decision, not a transient failure). RuntimeError is raised only if
     zero posts were collected across every query.
+
+    ``redactor``, when provided, is applied to every post's
+    ``text_redacted`` field as defense in depth on top of the MCP-side
+    redaction (x-mcp already applies its own patterns before returning
+    posts): this covers config/policy.yaml patterns the MCP server may not
+    implement (e.g. private keys, anthropic keys, claude-proxy session
+    tokens), so a pattern that leaked past the upstream stage still cannot
+    reach signals.json.
     """
     x_mcp_url = os.environ.get("X_MCP_URL")
     if not x_mcp_url:
@@ -155,6 +165,10 @@ def collect_signals(
             continue
 
         posts = json.loads(text_payload or "{}").get("posts") or []
+        if redactor is not None:
+            for post in posts:
+                if isinstance(post.get("text_redacted"), str):
+                    post["text_redacted"] = redactor.redact(post["text_redacted"])
         total_posts += len(posts)
         query_results.append({"query": query, "posts": posts})
 
@@ -392,6 +406,9 @@ def run_claude_digest(
     query_set = (config.schedules.get("query_sets") or {}).get(query_set_name) or {}
     queries = list(query_set.get("queries") or [])
 
+    redaction_policy = config.policy.get("redaction_policy") or {}
+    redactor = Redactor(redaction_policy.get("patterns") or [])
+
     signals = collect_signals(
         auth_client=auth_client,
         repository=repository,
@@ -400,6 +417,7 @@ def run_claude_digest(
         role=role,
         queries=queries,
         mcp_client_factory=mcp_client_factory,
+        redactor=redactor,
     )
     (workspace / "signals.json").write_text(json.dumps(signals, ensure_ascii=False, indent=2), encoding="utf-8")
 

@@ -44,10 +44,37 @@ type redactionPattern struct {
 	regex *regexp.Regexp
 }
 
+// defaultRedactionPatterns ports every entry under
+// config/policy.yaml's redaction_policy.patterns, in the same order, using
+// Go's RE2 regexp syntax (a straight port since all of the source patterns
+// are RE2-compatible). Keep this list and the parity guard test
+// (tests/test_redaction_parity.py) in sync: that test fails the build when a
+// pattern is added to policy.yaml without being ported here.
 var defaultRedactionPatterns = []redactionPattern{
 	{
+		// policy.yaml: redaction_policy.patterns[env_assignment]
 		name:  "env_assignment",
 		regex: regexp.MustCompile(`(?i)(api[_-]?key|secret|token|password)\s*=`),
+	},
+	{
+		// policy.yaml: redaction_policy.patterns[private_key]
+		name:  "private_key",
+		regex: regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
+	},
+	{
+		// policy.yaml: redaction_policy.patterns[bearer_token]
+		name:  "bearer_token",
+		regex: regexp.MustCompile(`Bearer\s+[A-Za-z0-9._~+/-]+=*`),
+	},
+	{
+		// policy.yaml: redaction_policy.patterns[anthropic_key]
+		name:  "anthropic_key",
+		regex: regexp.MustCompile(`sk-ant-[A-Za-z0-9._-]+`),
+	},
+	{
+		// policy.yaml: redaction_policy.patterns[claude_proxy_session_token]
+		name:  "claude_proxy_session_token",
+		regex: regexp.MustCompile(`cp_sess_[A-Za-z0-9._-]+`),
 	},
 }
 

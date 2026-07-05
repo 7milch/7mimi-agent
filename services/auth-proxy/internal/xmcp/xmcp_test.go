@@ -164,6 +164,24 @@ func TestToolsCallWriteToolRejected(t *testing.T) {
 	}
 }
 
+// TestToolsCallCreatePostRejected exercises the real X write tool name
+// (x.create_post) rather than a placeholder, since x-mcp-readonly's tool
+// registry (var tools) never lists any write tool: any such name is
+// "unregistered" and rejected with -32602, the same path as an arbitrary
+// unknown tool name.
+func TestToolsCallCreatePostRejected(t *testing.T) {
+	h := newTestHandler(t)
+	rec := postJSON(t, h, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"x.create_post","arguments":{"text":"hello"}}}`)
+	resp := decodeResponse(t, rec)
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error, got %v", resp)
+	}
+	if code, _ := errObj["code"].(float64); int(code) != -32602 {
+		t.Errorf("code = %v, want -32602", errObj["code"])
+	}
+}
+
 func TestNewHandlerRequiresNonEmptySessionToken(t *testing.T) {
 	if _, err := NewHandler("", nil); err == nil {
 		t.Fatal("expected error for empty session token, got nil")

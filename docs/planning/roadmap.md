@@ -81,9 +81,9 @@
 - [x] PreToolUse hook
 - [x] PostToolUse hook
 - [x] tool allowlist per role
-- [ ] secret redaction
-- [ ] X write tool block tests
-- [ ] prompt injection fixture tests
+- [x] secret redaction
+- [x] X write tool block tests
+- [x] prompt injection fixture tests
 
 ### Phase 3: Scheduled autonomy
 

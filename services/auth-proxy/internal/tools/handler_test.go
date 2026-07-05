@@ -45,6 +45,33 @@ func TestAiItRunnerCannotCreatePost(t *testing.T) {
 	}
 }
 
+// TestAiItRunnerDeniesAllXWriteTools is a regression guard (Issue #18): X
+// posts are signals, never evidence, and no role may ever be authorized to
+// perform an X write operation. ai_it_topic_runner is the only role covered
+// by the embedded dev policy (policy.NewDevEngine); every X write tool must
+// still block for it whether via an explicit deny pattern or default-deny
+// (not present in the role's allow list).
+func TestAiItRunnerDeniesAllXWriteTools(t *testing.T) {
+	xWriteTools := []string{
+		"x.create_post",
+		"x.delete_post",
+		"x.like_post",
+		"x.repost",
+		"x.follow_user",
+		"x.send_dm",
+		"x.update_profile",
+	}
+	for _, toolName := range xWriteTools {
+		toolName := toolName
+		t.Run(toolName, func(t *testing.T) {
+			decision := authorize(t, `{"role":"ai_it_topic_runner","tool_name":"`+toolName+`"}`)
+			if decision["decision"] != "block" {
+				t.Fatalf("decision = %v, want block for %s", decision["decision"], toolName)
+			}
+		})
+	}
+}
+
 func TestAiItRunnerJquantsWildcardDenied(t *testing.T) {
 	decision := authorize(t, `{"role":"ai_it_topic_runner","tool_name":"jquants.get_daily_quotes"}`)
 	if decision["decision"] != "block" {
