@@ -27,3 +27,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Goal file for Claude's loop feature (local only, never commit)
+GOAL.md
