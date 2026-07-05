@@ -241,3 +241,25 @@ func TestAuditOutputContainsNoTokenOrJWTFragments(t *testing.T) {
 		t.Fatalf("audit log leaks sensitive material: %s", logOutput)
 	}
 }
+
+func TestRelayStripsClientDotGitSuffixWithoutDoubling(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+	h := newTestHandler(t, "correct-token", upstream)
+
+	req := httptest.NewRequest(http.MethodGet, "/git/owner/repo.git/info/refs?service=git-upload-pack", nil)
+	req.Header.Set("Authorization", "Bearer correct-token")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/owner/repo.git/info/refs" {
+		t.Fatalf("upstream path = %q, want /owner/repo.git/info/refs (no .git doubling)", gotPath)
+	}
+}

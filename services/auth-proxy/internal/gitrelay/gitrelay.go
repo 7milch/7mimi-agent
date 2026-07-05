@@ -88,10 +88,16 @@ func (h *Handler) handleNotFound(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// repoName strips a client-supplied ".git" suffix; the upstream path always
+// re-appends exactly one ".git", so both URL forms work without doubling.
+func repoName(raw string) string {
+	return strings.TrimSuffix(raw, ".git")
+}
+
 func (h *Handler) handleInfoRefs(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	owner := r.PathValue("owner")
-	repo := r.PathValue("repo")
+	repo := repoName(r.PathValue("repo"))
 	service := r.URL.Query().Get("service")
 
 	if service != "git-upload-pack" && service != "git-receive-pack" {
@@ -116,7 +122,7 @@ func (h *Handler) handleService(service string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		owner := r.PathValue("owner")
-		repo := r.PathValue("repo")
+		repo := repoName(r.PathValue("repo"))
 
 		if !h.authorize(w, r) {
 			h.audit(r, owner, repo, service, "block", "unauthorized", 0, time.Since(start))
