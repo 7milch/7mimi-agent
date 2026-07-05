@@ -106,6 +106,8 @@ Decision: daily digest の `7milch/ai-it-research-notes` への publish は、or
 
 Reason: roadmap の「digest を notes repo に push する縦切り」を最小構成で成立させるため。書き込み先制限は LLM の外側の決定的 path policy で担保し、ホスト credential の利用は local 実行(LocalRunnerBackend)に限定することで、コンテナ境界の credential 不在原則(ADR-010/013)を維持する。
 
+廃止(2026-07-05): git relay の E2E 成功に伴い、本経路(--publish / runner からの writer.publish 呼び出し)は廃止した(ADR-020)。path policy 検証は security/path_policy.py として引き続き有効。
+
 ### ADR-019: シグナル要約 LLM は claude-proxy 経由・フォールバック必須の opt-in とする
 
 Decision: 収集した X シグナルの要約(what_happened / why_it_matters)は、`CLAUDE_PROXY_URL` と `CLAUDE_PROXY_SESSION_TOKEN` が設定されている場合のみ claude-proxy 経由の `/v1/messages`(非ストリーミング、model は ADR-016 の resolve_model、max_tokens 400)で生成する。LLM 呼び出しは tool `claude.summarize_signals` として PreToolUse 認可を通し、deny・proxy 障害・応答パース失敗のいずれでも決定的構築(ADR-017)へフォールバックして digest 生成を継続する。ポスト本文は信頼できないデータとして system prompt で指示追従を禁止し、出力は JSON 強制+検証する。LLM 出力も signal の要約であり evidence とはしない。

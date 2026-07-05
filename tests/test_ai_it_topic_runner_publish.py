@@ -46,26 +46,17 @@ class AiItTopicRunnerPublishTest(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmpdir.cleanup()
 
-    def test_dry_run_false_calls_publish_and_records_metadata(self) -> None:
+    def test_dry_run_false_raises_not_implemented(self) -> None:
+        """ADR-020: host-side publish is retired; the runner path must not call writer.publish."""
         runner = AiItTopicRunner(config=self.config, repository=self.repository, policy_engine=self.policy_engine)
         stub = StubWriter(self.root)
         runner.writer = stub
 
-        result = runner.run_daily_digest(session_id="sess1", task_id="task1", job=self.job, dry_run=False)
+        with self.assertRaises(NotImplementedError):
+            runner.run_daily_digest(session_id="sess1", task_id="task1", job=self.job, dry_run=False)
 
-        self.assertEqual(result.status, "succeeded")
-        self.assertEqual(len(stub.publish_calls), 1)
+        self.assertEqual(len(stub.publish_calls), 0)
         self.assertEqual(len(stub.write_dry_run_calls), 0)
-        self.assertIn("(7mimi-agent)", stub.publish_calls[0]["commit_message"])
-
-        docs = self.repository.list_documents() if hasattr(self.repository, "list_documents") else None
-        # Fall back to raw connection query if there is no convenience accessor.
-        if docs is None:
-            with self.repository._connect() as conn:  # type: ignore[attr-defined]
-                row = conn.execute("SELECT status, metadata_json FROM documents ORDER BY id DESC LIMIT 1").fetchone()
-        else:
-            row = docs[-1]
-        self.assertIsNotNone(row)
 
     def test_dry_run_default_regression_unchanged(self) -> None:
         runner = AiItTopicRunner(config=self.config, repository=self.repository, policy_engine=self.policy_engine)

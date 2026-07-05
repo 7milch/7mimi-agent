@@ -63,6 +63,13 @@ class DocumentRepositoryWriter:
         commit_message: str,
         remote_url: str | None = None,
     ) -> WriteResult:
+        """Clone/commit/push a document into the target repo.
+
+        Retired from the runner path (ADR-020): AiItTopicRunner.run_daily_digest no
+        longer calls this for non-dry-run publishing (publishing now happens via the
+        git relay). Retained here for reference and for its existing path-policy test
+        coverage until the relay-based writer lands.
+        """
         repo_policy = self._find_repo_policy(repo)
         allowed = list((repo_policy or {}).get("allowed_paths") or [])
         denied = list((repo_policy or {}).get("denied_paths") or [])

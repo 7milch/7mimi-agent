@@ -25,26 +25,23 @@ def _run(*args: str, cwd: Path) -> subprocess.CompletedProcess:
 
 
 class CliPublishFlagSemanticsTest(unittest.TestCase):
-    """Verifies run-job --publish / --dry-run dispatch semantics per issue #8 spec."""
+    """ADR-020: run-job no longer accepts --publish; publishing happens via the git relay."""
 
     def _parse(self, extra: list[str]):
         parser = build_parser()
         return parser.parse_args(["run-job", "ai-it-x-daily-digest", *extra])
 
+    def test_run_job_has_no_publish_flag(self) -> None:
+        with self.assertRaises(SystemExit):
+            self._parse(["--publish"])
+
     def test_no_flags_defaults_to_dry_run(self) -> None:
         args = self._parse([])
-        effective_dry_run = not args.publish or args.dry_run
-        self.assertTrue(effective_dry_run)
+        self.assertFalse(args.dry_run)
 
-    def test_publish_alone_disables_dry_run(self) -> None:
-        args = self._parse(["--publish"])
-        effective_dry_run = not args.publish or args.dry_run
-        self.assertFalse(effective_dry_run)
-
-    def test_publish_and_dry_run_together_keeps_dry_run(self) -> None:
-        args = self._parse(["--publish", "--dry-run"])
-        effective_dry_run = not args.publish or args.dry_run
-        self.assertTrue(effective_dry_run)
+    def test_dry_run_flag_still_accepted(self) -> None:
+        args = self._parse(["--dry-run"])
+        self.assertTrue(args.dry_run)
 
     def test_runner_execute_subcommand_has_no_publish_flag(self) -> None:
         # Container path (runner-execute) must not gain an implicit publish
@@ -63,17 +60,19 @@ class CliPublishFlagSemanticsTest(unittest.TestCase):
                 ]
             )
 
-
-    def test_publish_with_container_runner_is_rejected_before_any_backend_work(self) -> None:
-        args = self._parse(["--publish", "--runner", "container"])
+    def test_run_job_with_container_runner_dispatches_to_container_backend(self) -> None:
+        # Publish retired: the container+publish guard is obsolete, so
+        # --runner container should now proceed straight to backend dispatch.
+        args = self._parse(["--runner", "container"])
 
         with mock.patch("shichimimi_agent.cli._load_validated_config") as load_config, \
              mock.patch("shichimimi_agent.cli.ContainerRunnerBackend") as container_backend, \
              mock.patch("shichimimi_agent.cli.LocalRunnerBackend") as local_backend:
+            load_config.side_effect = ValueError("stop before backend construction")
             exit_code = cmd_run_job(args)
 
         self.assertNotEqual(exit_code, 0)
-        load_config.assert_not_called()
+        load_config.assert_called_once()
         container_backend.assert_not_called()
         local_backend.assert_not_called()
 

@@ -45,6 +45,8 @@ class AiItTopicRunner:
         self.repository = repository
         self.policy_engine = policy_engine
         self.auth_client = auth_client or AuthProxyClient(local_fallback_engine=policy_engine)
+        # DocumentRepositoryWriter.publish is retired from this runner path (ADR-020);
+        # retained on the class for reference/tests until the relay-based writer lands.
         self.writer = DocumentRepositoryWriter(
             config.root,
             document_repositories=(config.policy.get("document_repositories") or {}),
@@ -83,12 +85,8 @@ class AiItTopicRunner:
         if dry_run:
             write_result = self.writer.write_dry_run(relative_path=relative_path, content=markdown)
         else:
-            write_result = self.writer.publish(
-                repo=repo,
-                relative_path=relative_path,
-                content=markdown,
-                commit_message=f"docs: daily AI/IT digest {date.isoformat()} (7mimi-agent)",
-            )
+            # Host-side publish retired (ADR-020); publishing now happens via the git relay.
+            raise NotImplementedError("host-side publish retired (ADR-020); use the git relay")
         run_post_tool_use(
             self.repository,
             session_id=session_id,
