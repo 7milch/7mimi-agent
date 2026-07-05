@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from shichimimi_agent.config import load_config, validate_config
+from shichimimi_agent.config.model_selection import resolve_model
 from shichimimi_agent.db import Repository, default_db_path, migrate
 from shichimimi_agent.runner import ContainerRunnerBackend, ContainerRunnerOptions, LocalRunnerBackend, RunnerTask, execute_runner_task
 from shichimimi_agent.sessions.workspace import create_workspace
@@ -158,6 +159,59 @@ def cmd_claude_smoke(args: argparse.Namespace) -> int:
     summary = summarize_result(result)
     repository.update_session_status(session_id, "stopped" if result.exit_code == 0 else "failed")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0 if result.exit_code == 0 else 1
+
+
+def cmd_claude_digest(args: argparse.Namespace) -> int:
+    """ADR-021: integrated autonomous digest job (Claude Code in agent-runner + git relay)."""
+    from shichimimi_agent.runner.claude_digest import ClaudeDigestOptions, run_claude_digest
+
+    try:
+        config = _load_validated_config(args.root)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    migrate(default_db_path(config.root))
+    repository = Repository.for_root(config.root)
+
+    try:
+        job = _find_job(config, args.job)
+    except KeyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    role = job["role"]
+    role_config = ((config.roles or {}).get("roles") or {}).get(role) or {}
+    model = args.model or resolve_model(role_config, config.policy)
+
+    session_id = repository.create_session(source="claude-digest", role=role, workspace_path="")
+    workspace = create_workspace(config.root, session_id)
+    repository.update_session_status(session_id, "running")
+    task_id = repository.create_task(session_id=session_id, role=role, input_data={"job": job})
+
+    result = run_claude_digest(
+        config=config,
+        repository=repository,
+        session_id=session_id,
+        task_id=task_id,
+        workspace=workspace,
+        job=job,
+        options=ClaudeDigestOptions(model=model, max_turns=args.max_turns),
+    )
+
+    if result.exit_code == 0:
+        repository.finish_task(task_id, status="succeeded", output={"path": result.verified_path, "commit_sha": result.commit_sha})
+        repository.update_session_status(session_id, "stopped")
+    else:
+        repository.finish_task(task_id, status="failed", error={"type": "ClaudeDigestError", "message": "digest run or verification failed"})
+        repository.update_session_status(session_id, "failed")
+
+    print(json.dumps({
+        "exit_code": result.exit_code,
+        "verified": result.verified,
+        "verified_path": result.verified_path,
+        "commit_sha": result.commit_sha,
+    }, ensure_ascii=False, indent=2))
     return 0 if result.exit_code == 0 else 1
 
 
@@ -313,6 +367,12 @@ def build_parser() -> argparse.ArgumentParser:
     x_smoke.add_argument("--max-results", type=int, default=10)
     x_smoke.add_argument("--mcp-url", default=None)
     x_smoke.set_defaults(func=cmd_x_smoke)
+
+    claude_digest = sub.add_parser("claude-digest")
+    claude_digest.add_argument("--job", default="ai-it-x-daily-digest")
+    claude_digest.add_argument("--model", default=None)
+    claude_digest.add_argument("--max-turns", type=int, default=40)
+    claude_digest.set_defaults(func=cmd_claude_digest)
 
     stock = sub.add_parser("research-stock")
     stock.add_argument("ticker")
