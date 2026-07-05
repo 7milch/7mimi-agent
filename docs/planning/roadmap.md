@@ -104,20 +104,22 @@
 - [x] API key separation by MCP container (auth-proxy へ集約、ADR-023)
 
 ### Phase 5: Persistent session runner
+> 本フェーズは ADR-030 により現時点 deferred(明示的見送り)。
 
-- [ ] one session one runner container
-- [ ] idle timeout
-- [ ] session TTL
-- [ ] workspace reuse
-- [ ] warm session support
+- [~] one session one runner container (deferred — ADR-030)
+- [~] idle timeout (deferred — ADR-030)
+- [~] session TTL (deferred — ADR-030)
+- [~] workspace reuse (deferred — ADR-030)
+- [~] warm session support (deferred — ADR-030)
 
 ### Phase 6: Source expansion
+> 本フェーズは ADR-030 により現時点 deferred(明示的見送り)。
 
-- [ ] EDINET tool / MCP
-- [ ] IR page fetch and parsing
-- [ ] TDnet-like disclosure integration if available / needed
+- [~] EDINET tool / MCP (deferred — ADR-030)
+- [~] IR page fetch and parsing (deferred — ADR-030)
+- [~] TDnet-like disclosure integration if available / needed (deferred — ADR-030)
 - [x] Slack / Discord notification (Slack bot 通知、ADR-026)
-- [ ] GitHub issue / PR trigger
+- [~] GitHub issue / PR trigger (deferred — ADR-030)
 
 ---
 
