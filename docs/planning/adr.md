@@ -139,3 +139,9 @@ Reason: Phase 3(scheduled autonomy)の最小構成として、外部依存なし
 Decision: ADR-015 の Python 製 x-mcp-readonly サーバを撤去し、同一の MCP プロトコル契約(JSON-RPC 2.0、`POST /mcp`、read-only 4 tool、21.13.1 正規化、redaction、token 非漏洩)を auth-proxy(Go)の `internal/xmcp` として再実装する。`X_BEARER_TOKEN` は auth-proxy のみが保持し(未設定時は /mcp を mount しない)、X_MCP_URL は auth-proxy(:18081)を指す。Python 側は MCP クライアント(`mcp/client.py`)のみを維持する。/mcp は gitrelay と同一のセッション Bearer(AUTH_PROXY_SESSION_TOKEN、定数時間比較)で保護し、X_BEARER_TOKEN とセッション token の両方が設定された場合のみ mount する。クライアントは X_MCP_SESSION_TOKEN で同 token を送出する。
 
 Reason: credential 保有者を Go 境界サービス(auth-proxy: tool 認可 + git relay + X API)に集約し、監査の一本化と常駐プロセス削減(4→3)を得るため。ADR-015 時点では「データ収集は Python」の整理だったが、実装後の運用で credential 分散と常駐プロセス数の方が支配的な関心事になったため方針を改訂する。正規化・redaction のロジックは小さく、Go 移植のコストより集約の利得が上回ると判断した。
+
+### ADR-024: 常駐化は docker compose によるサイドカー構成とする
+
+Decision: claude-proxy・auth-proxy・scheduler(`schedule run`)の常駐は単一の `docker-compose.yml` で管理する(restart: unless-stopped、healthcheck 付き)。scheduler コンテナは `/var/run/docker.sock` をマウントし、agent-runner を sibling コンテナとしてホストの Docker daemon で起動する。このためリポジトリはホストと同一絶対パスで scheduler コンテナにマウントし、セッション workspace の `-v` パス整合を保つ。secrets は gitignored な `.env`(env_file)と read-only の pem マウントで注入し、イメージには焼き込まない。proxy 類は 18080/18081 をホストに公開し、runner/scheduler からは `host.docker.internal` で到達する。proxy の 18080/18081 は全インターフェースに公開する(sibling runner が host-gateway 経由で到達するため loopback bind は不可)。LAN 内の第三者アクセスはセッション Bearer のみで防御されるため、信頼できないネットワークではホスト側 firewall で遮断する運用とする。
+
+Reason: 毎朝の自律 digest(ADR-021/022)を人手なしで回すため、プロセス管理を Docker の restart/healthcheck に委ねる。docker.sock マウントは実質ホスト root 相当の権限だが、scheduler イメージは自前ビルド・自前コードのみで外部入力を実行しないため、launchd 複数管理より単純さを優先する。egress の DNAT 強制(#17)は本構成の上に重ねる。

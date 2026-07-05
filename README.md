@@ -128,3 +128,30 @@ Smoke-test the relay without a full runner container:
 git -c http.http://127.0.0.1:18081/git/.extraheader="Authorization: Bearer $AUTH_PROXY_SESSION_TOKEN" \
     ls-remote http://127.0.0.1:18081/git/7milch/ai-it-research-notes
 ```
+
+## Resident stack (docker compose)
+
+`docker-compose.yml` (ADR-024) runs claude-proxy, auth-proxy, and the scheduler (`schedule run`) as long-lived, `restart: unless-stopped` sidecar services so the daily digest job (ADR-021/022) runs without a human starting anything.
+
+```bash
+cp .env.example .env
+# fill in ANTHROPIC_API_KEY, AUTH_PROXY_SESSION_TOKEN, X_BEARER_TOKEN,
+# GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_HOST_PATH, and (optionally)
+# CLAUDE_PROXY_DEV_TOKEN / REPO_ROOT in .env
+
+# the agent-runner image must be built separately — the scheduler launches it
+# as a sibling container via the host Docker daemon, docker compose does not
+# build it
+docker build -f Dockerfile.agent-runner -t 7mimi-agent-runner:latest .
+
+docker compose up -d --build
+docker compose ps
+docker compose logs -f scheduler
+```
+
+Notes:
+
+- The scheduler container mounts the repository at the *same absolute path* on host and container (`REPO_ROOT`, defaulting to `$PWD`) and mounts `/var/run/docker.sock`, so the `docker run -v <path>` commands it issues for agent-runner containers resolve correctly against the host Docker daemon (not the scheduler container's own filesystem).
+- claude-proxy and auth-proxy publish `18080`/`18081` on the host; the scheduler and any agent-runner containers reach them via `host.docker.internal`.
+- These ports are bound on all interfaces (not just loopback), since sibling runner containers reach them via the host-gateway address; the only defense against LAN access is the session Bearer token, so on untrusted networks block `18080`/`18081` with the host firewall.
+- Stop the stack with `docker compose down`; it does not remove `.data/`, `.sessions/`, or agent-runner images.

@@ -1,0 +1,69 @@
+# Resident stack for the 7mimi-agent scheduler + security-boundary proxies
+# (Issue #16 / ADR-024). All three services run continuously on the host;
+# agent-runner containers are launched on demand as sibling containers by the
+# scheduler via the mounted host Docker socket, not by this compose file.
+
+services:
+  claude-proxy:
+    build:
+      context: services/claude-proxy
+    ports:
+      - "18080:18080"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/claude-proxy", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  auth-proxy:
+    build:
+      context: services/auth-proxy
+    ports:
+      - "18081:18081"
+    environment:
+      AUTH_PROXY_SESSION_TOKEN: ${AUTH_PROXY_SESSION_TOKEN:?AUTH_PROXY_SESSION_TOKEN is required}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY_PATH: /secrets/github-app-key.pem
+      X_BEARER_TOKEN: ${X_BEARER_TOKEN:?X_BEARER_TOKEN is required}
+    volumes:
+      - ${GITHUB_APP_PRIVATE_KEY_HOST_PATH:?GITHUB_APP_PRIVATE_KEY_HOST_PATH is required}:/secrets/github-app-key.pem:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/auth-proxy", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    command: ["python", "-m", "shichimimi_agent", "schedule", "run"]
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mounted at the IDENTICAL absolute host path: sibling agent-runner
+      # containers launched by the scheduler via the host Docker daemon use
+      # this same path in their own `-v` bind mounts, which are resolved by
+      # the host daemon (not this container's filesystem).
+      - ${REPO_ROOT:-${PWD}}:${REPO_ROOT:-${PWD}}
+    working_dir: ${REPO_ROOT:-${PWD}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PYTHONPATH: ${REPO_ROOT:-${PWD}}/src
+      X_MCP_URL: http://host.docker.internal:18081
+      X_MCP_SESSION_TOKEN: ${AUTH_PROXY_SESSION_TOKEN:?AUTH_PROXY_SESSION_TOKEN is required}
+      CLAUDE_PROXY_URL: http://host.docker.internal:18080
+      CLAUDE_PROXY_SESSION_TOKEN: ${CLAUDE_PROXY_DEV_TOKEN:-cp_sess_dev}
+      GIT_PROXY_URL: http://host.docker.internal:18081
+      GIT_PROXY_SESSION_TOKEN: ${AUTH_PROXY_SESSION_TOKEN:?AUTH_PROXY_SESSION_TOKEN is required}
+    depends_on:
+      claude-proxy:
+        condition: service_healthy
+      auth-proxy:
+        condition: service_healthy
