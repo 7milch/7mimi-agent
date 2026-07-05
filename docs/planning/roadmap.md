@@ -88,9 +88,9 @@
 ### Phase 3: Scheduled autonomy
 
 - [x] cron scheduler
-- [ ] x-signal-collector job
-- [ ] stock-signal-fact-check job
-- [ ] daily-digest-writer job
+- [x] x-signal-collector job
+- [x] stock-signal-fact-check job (superseded — research stock / J-Quants, ADR-029)
+- [x] daily-digest-writer job (superseded — direct-MCP ai-it/invest digests, ADR-029)
 - [x] concurrency policy
 - [x] retry / timeout
 

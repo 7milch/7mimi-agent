@@ -55,15 +55,24 @@ def cmd_schedule_list(args: argparse.Namespace) -> int:
 def _build_scheduler_executors(config: Any, repository: Repository) -> dict[str, Any]:
     """Wire executors for jobs with an implemented run path (ADR-022).
 
-    "ai-it-x-daily-digest" (claude-digest pipeline) and "invest-x-daily-digest"
-    (invest-digest pipeline, ADR-026) have executors today. Other jobs have no
-    executor and are skipped by the engine.
+    "x-signal-collector" (collect_x, deterministic X signal registration,
+    ADR-029), "ai-it-x-daily-digest" (claude-digest pipeline) and
+    "invest-x-daily-digest" (invest-digest pipeline, ADR-026) have executors
+    today. Other jobs (stock-signal-fact-check, daily-digest-writer) have no
+    executor and are skipped by the engine -- their functionality has been
+    folded into `research stock` / the direct-MCP digests instead (ADR-029).
     """
     import os
 
     from shichimimi_agent.runner.claude_digest import ClaudeDigestOptions, run_claude_digest
+    from shichimimi_agent.runner.collect_x import run_collect_x
     from shichimimi_agent.runner.invest_digest import InvestDigestOptions, run_invest_digest
     from shichimimi_agent.sessions.workspace import create_workspace
+
+    x_signal_collector_required_env = [
+        "X_MCP_URL",
+        "X_MCP_SESSION_TOKEN",
+    ]
 
     required_env = [
         "X_MCP_URL",
@@ -147,7 +156,31 @@ def _build_scheduler_executors(config: Any, repository: Repository) -> dict[str,
             repository.update_session_status(session_id, "failed")
             raise RuntimeError("invest-digest run failed or slack notify failed")
 
+    def _run_x_signal_collector(job: dict[str, Any]) -> None:
+        missing = [name for name in x_signal_collector_required_env if not os.environ.get(name)]
+        if missing:
+            raise RuntimeError(f"required env missing: {', '.join(missing)}")
+
+        inputs = job.get("inputs") or {}
+        query_set_name = inputs.get("query_set", "default_x_watch")
+        query_sets = config.schedules.get("query_sets") or {}
+        query_set = query_sets.get(query_set_name) or {}
+        queries = query_set.get("queries") or []
+        if not queries:
+            raise RuntimeError(f"query_set {query_set_name!r} has no queries configured")
+
+        max_results = min(int(inputs.get("max_posts_per_query", 20)), 50)
+
+        for query in queries:
+            run_collect_x(
+                config=config,
+                repository=repository,
+                query=query,
+                max_results=max_results,
+            )
+
     return {
+        "x-signal-collector": _run_x_signal_collector,
         "ai-it-x-daily-digest": _run_ai_it_x_daily_digest,
         "invest-x-daily-digest": _run_invest_x_daily_digest,
     }
