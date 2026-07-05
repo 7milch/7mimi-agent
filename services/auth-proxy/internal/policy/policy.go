@@ -32,9 +32,10 @@ type Engine struct {
 	roles map[string]RolePolicy
 }
 
-// NewDevEngine returns the embedded development policy. It intentionally
-// covers only ai_it_topic_runner for the MVP; full config/policy.yaml
-// compatibility comes later.
+// NewDevEngine returns the embedded development policy, mirroring
+// config/policy.yaml's role_tool_policy for the roles relevant to the /mcp
+// boundary (ai_it_topic_runner, investment_signal_runner, stock_researcher).
+// Full config/policy.yaml compatibility for every role comes later.
 func NewDevEngine() *Engine {
 	return &Engine{roles: map[string]RolePolicy{
 		"ai_it_topic_runner": {
@@ -54,10 +55,62 @@ func NewDevEngine() *Engine {
 				"x.repost",
 				"x.follow_user",
 				"x.send_dm",
-				"jquants.*",
+				"jq.*",
 				"trading.*",
 				"document.write_outside_workspace",
 				"document.delete_recursive",
+			},
+		},
+		// Mirrors config/policy.yaml role_tool_policy.investment_signal_runner
+		// exactly (parity-tested by tests/test_policy_parity.py): read-only X
+		// search plus Slack digest posting only, no X writes, no J-Quants, no
+		// trading, no document writes.
+		"investment_signal_runner": {
+			Allow: []string{
+				"x.search_posts_recent",
+				"slack.post_digest",
+			},
+			Deny: []string{
+				"x.create_post",
+				"x.like_post",
+				"x.repost",
+				"x.follow_user",
+				"x.send_dm",
+				"jquants.*",
+				"trading.*",
+				"document.write_markdown",
+				"document.write_outside_workspace",
+				"document.delete_recursive",
+			},
+		},
+		// Mirrors config/policy.yaml role_tool_policy.stock_researcher exactly
+		// (parity-tested). jquants.* legacy names and jq.* (ADR-027 /mcp tool
+		// names) are both allowed since policy.yaml lists both.
+		"stock_researcher": {
+			Allow: []string{
+				"jquants.get_listed_info",
+				"jquants.get_daily_quotes",
+				"jquants.get_financial_statements",
+				"jquants.get_dividends",
+				"jquants.get_earnings_calendar",
+				"jq.get_listed_info",
+				"jq.get_daily_quotes",
+				"jq.get_statements",
+				"x.search_posts_recent",
+				"web.fetch_url",
+				"web.extract_article",
+				"document.read",
+				"queue.get_candidate",
+				"queue.update_status",
+			},
+			Deny: []string{
+				"x.create_post",
+				"x.like_post",
+				"x.repost",
+				"x.follow_user",
+				"x.send_dm",
+				"document.write_markdown",
+				"trading.*",
 			},
 		},
 	}}

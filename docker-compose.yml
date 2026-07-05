@@ -48,6 +48,8 @@ services:
       # the invest-x-daily-digest job cannot publish. Never required here.
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      # ADR-028: deterministic per-session hard cap on /mcp tool calls.
+      AUTH_PROXY_MCP_CALL_CAP: ${AUTH_PROXY_MCP_CALL_CAP:-60}
     volumes:
       - ${GITHUB_APP_PRIVATE_KEY_HOST_PATH:?GITHUB_APP_PRIVATE_KEY_HOST_PATH is required}:/secrets/github-app-key.pem:ro
     restart: unless-stopped

@@ -14,6 +14,7 @@ import (
 
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/githubapp"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/session"
 )
 
 func testTokenSource(t *testing.T, upstream *httptest.Server) *githubapp.TokenSource {
@@ -261,5 +262,75 @@ func TestRelayStripsClientDotGitSuffixWithoutDoubling(t *testing.T) {
 	}
 	if gotPath != "/owner/repo.git/info/refs" {
 		t.Fatalf("upstream path = %q, want /owner/repo.git/info/refs (no .git doubling)", gotPath)
+	}
+}
+
+// TestRelayAcceptsMintedSessionToken exercises the one /git enforcement path
+// added by ADR-028 that otherwise has no direct Go coverage: a session
+// token minted via session.Store.Issue (as /session/issue would mint it)
+// must be accepted here (validity only, no role check), reaching the
+// upstream proxy the same as the static admin token.
+func TestRelayAcceptsMintedSessionToken(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	store := session.NewStore()
+	defer store.Close()
+	h := newTestHandler(t, "correct-token", upstream).WithSession(store)
+
+	token, _ := store.Issue("ai_it_topic_runner")
+	req := httptest.NewRequest(http.MethodGet, "/git/owner/repo/info/refs?service=git-upload-pack", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("status = %d, want minted session token to be accepted (not 401)", rec.Code)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.HasPrefix(gotAuth, "Basic ") {
+		t.Fatalf("upstream Authorization = %q, want Basic (installation token), never the client bearer", gotAuth)
+	}
+}
+
+// TestRelayRejectsUnknownOrExpiredSessionToken confirms a session store
+// wired in does not weaken authorization: an unrecognized/expired token is
+// still 401, same as with no store at all.
+func TestRelayRejectsUnknownOrExpiredSessionToken(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream should not be reached with an unknown/expired session token")
+	}))
+	defer upstream.Close()
+
+	store := session.NewStore()
+	defer store.Close()
+	h := newTestHandler(t, "correct-token", upstream).WithSession(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/git/owner/repo/info/refs?service=git-upload-pack", nil)
+	req.Header.Set("Authorization", "Bearer never-issued-token")
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for unknown session token", rec.Code)
+	}
+
+	expiringStore := session.NewStore(session.WithTTL(time.Millisecond))
+	defer expiringStore.Close()
+	h2 := newTestHandler(t, "correct-token", upstream).WithSession(expiringStore)
+	expiredToken, _ := expiringStore.Issue("ai_it_topic_runner")
+	time.Sleep(5 * time.Millisecond)
+
+	req2 := httptest.NewRequest(http.MethodGet, "/git/owner/repo/info/refs?service=git-upload-pack", nil)
+	req2.Header.Set("Authorization", "Bearer "+expiredToken)
+	rec2 := httptest.NewRecorder()
+	h2.Routes().ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for expired session token", rec2.Code)
 	}
 }

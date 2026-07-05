@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/session"
 )
 
 const (
@@ -172,6 +174,8 @@ type Handler struct {
 	includeXTools bool
 	extraTools    []Tool
 	extraHandlers map[string]ToolHandler
+	store         *session.Store
+	policyEngine  *policy.Engine
 }
 
 // NewHandler builds an xmcp Handler. sessionToken must be non-empty
@@ -209,6 +213,27 @@ func NewHandlerWithOptions(sessionToken string, logger *audit.Logger, includeXTo
 	return h, nil
 }
 
+// WithSession attaches a session.Store and policy.Engine to an already
+// constructed Handler (ADR-028), enabling role-scoped session tokens on top
+// of the existing static-token admin path: requests presenting the static
+// token keep full, unfiltered access (backward compatible); requests
+// presenting a token resolved by store are filtered/authorized per role.
+func (h *Handler) WithSession(store *session.Store, engine *policy.Engine) *Handler {
+	h.store = store
+	h.policyEngine = engine
+	return h
+}
+
+// NewHandlerWithSession builds an xmcp Handler with session-store-backed
+// role enforcement wired in from construction (ADR-028).
+func NewHandlerWithSession(sessionToken string, logger *audit.Logger, includeXTools bool, store *session.Store, engine *policy.Engine, extras ...ExtraTool) (*Handler, error) {
+	h, err := NewHandlerWithOptions(sessionToken, logger, includeXTools, extras...)
+	if err != nil {
+		return nil, err
+	}
+	return h.WithSession(store, engine), nil
+}
+
 // allTools returns the tool list this handler exposes via tools/list,
 // reflecting includeXTools and any registered extras.
 func (h *Handler) allTools() []Tool {
@@ -218,6 +243,30 @@ func (h *Handler) allTools() []Tool {
 	}
 	result = append(result, h.extraTools...)
 	return result
+}
+
+// toolsForRole returns the tool list to advertise via tools/list: the full
+// list for the static-token/admin path (role == "", no filtering), or the
+// role-filtered subset when a session-store role was resolved and a policy
+// engine is configured (ADR-028) -- so a role never even sees denied tools.
+func (h *Handler) toolsForRole(role string) []Tool {
+	all := h.allTools()
+	if role == "" {
+		// Static/admin token: full, unfiltered list.
+		return all
+	}
+	if h.policyEngine == nil {
+		// Fail closed: a role-bound token with no engine sees nothing
+		// (matches the tools/call guard).
+		return nil
+	}
+	filtered := make([]Tool, 0, len(all))
+	for _, t := range all {
+		if h.policyEngine.Decide(role, t.Name).Decision == "allow" {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }
 
 func (h *Handler) hasTool(name string) bool {
@@ -278,20 +327,43 @@ func resultResponse(id any, result any) jsonrpcResponse {
 // gitrelay.Handler.authorize so /mcp is protected consistently with the
 // other routes on this listener.
 func (h *Handler) authorize(r *http.Request) bool {
+	ok, _ := h.authorizeToken(r)
+	return ok
+}
+
+// authorizeToken resolves the caller's Authorization header into (ok, role).
+// The static admin token (h.sessionToken) is preferred and always resolves
+// with role="" (no role filter, full access, current/backward-compatible
+// behavior). If the presented token doesn't match the static token and a
+// session.Store is configured, it is resolved there instead, yielding the
+// bound role. Neither match -> unauthorized.
+func (h *Handler) authorizeToken(r *http.Request) (ok bool, role string) {
 	const prefix = "Bearer "
 	auth := r.Header.Get("Authorization")
 	if !strings.HasPrefix(auth, prefix) {
-		return false
+		return false, ""
 	}
-	return subtle.ConstantTimeCompare([]byte(auth[len(prefix):]), []byte(h.sessionToken)) == 1
+	token := auth[len(prefix):]
+	if subtle.ConstantTimeCompare([]byte(token), []byte(h.sessionToken)) == 1 {
+		return true, ""
+	}
+	if h.store != nil {
+		if resolvedRole, found := h.store.Resolve(token); found {
+			return true, resolvedRole
+		}
+	}
+	return false, ""
 }
 
 func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	if !h.authorize(r) {
+	ok, role := h.authorizeToken(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	const prefix = "Bearer "
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), prefix)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.writeJSON(w, http.StatusOK, errorResponse(nil, jsonrpcParseError, "parse error"))
@@ -316,10 +388,10 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	case "tools/list":
-		h.writeJSON(w, http.StatusOK, resultResponse(req.ID, map[string]any{"tools": h.allTools()}))
+		h.writeJSON(w, http.StatusOK, resultResponse(req.ID, map[string]any{"tools": h.toolsForRole(role)}))
 		return
 	case "tools/call":
-		h.handleToolsCall(w, req, start)
+		h.handleToolsCall(w, req, role, token, start)
 		return
 	default:
 		h.writeJSON(w, http.StatusOK, errorResponse(req.ID, jsonrpcMethodMissing, "unknown method: "+req.Method))
@@ -332,7 +404,7 @@ type toolsCallParams struct {
 	Arguments map[string]any `json:"arguments"`
 }
 
-func (h *Handler) handleToolsCall(w http.ResponseWriter, req jsonrpcRequest, start time.Time) {
+func (h *Handler) handleToolsCall(w http.ResponseWriter, req jsonrpcRequest, role, token string, start time.Time) {
 	var params toolsCallParams
 	if len(req.Params) > 0 {
 		_ = json.Unmarshal(req.Params, &params)
@@ -346,8 +418,41 @@ func (h *Handler) handleToolsCall(w http.ResponseWriter, req jsonrpcRequest, sta
 		return
 	}
 
+	// Role-scoped session tokens (ADR-028) go through policy authorization
+	// and a hard per-session call cap before dispatch; the static admin
+	// token (role == "") skips both, matching current/local behavior.
+	//
+	// Note for future readers: Decide() is only reachable here for tool
+	// names that pass hasTool() above, i.e. names that EXIST in this
+	// handler's tool table (built-in X tools plus any registered extras)
+	// but are denied for the resolved role (e.g. "jq.*" for
+	// ai_it_topic_runner). A name that was never mounted at all (e.g.
+	// "x.create_post", which x-mcp-readonly never registers) is rejected by
+	// hasTool() above and never reaches Decide(), regardless of role.
+	if role != "" {
+		// Fail closed: a role-bound token with no policy engine wired must not
+		// gain unrestricted access. Production always wires NewDevEngine, so
+		// this only guards against a future mis-wired caller.
+		if h.policyEngine == nil {
+			h.auditBlock(role, params.Name, "no policy engine for role-bound token")
+			h.writeJSON(w, http.StatusOK, errorResponse(req.ID, jsonrpcMethodMissing, "tool not permitted for role"))
+			return
+		}
+		decision := h.policyEngine.Decide(role, params.Name)
+		if decision.Decision != "allow" {
+			h.auditBlock(role, params.Name, "tool not permitted for role: "+decision.Reason)
+			h.writeJSON(w, http.StatusOK, errorResponse(req.ID, jsonrpcMethodMissing, "tool not permitted for role"))
+			return
+		}
+		if h.store != nil && !h.store.Charge(token) {
+			h.auditBlock(role, params.Name, "call cap exceeded")
+			h.writeJSON(w, http.StatusOK, errorResponse(req.ID, jsonrpcInvalidParams, "call cap exceeded"))
+			return
+		}
+	}
+
 	result := h.callTool(params.Name, params.Arguments)
-	h.audit(params.Name, result.upstreamStatus, time.Since(start))
+	h.audit(role, params.Name, result.upstreamStatus, time.Since(start))
 	h.writeJSON(w, http.StatusOK, resultResponse(req.ID, result.toResultMap()))
 }
 
@@ -724,7 +829,31 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func (h *Handler) audit(toolName string, upstreamStatus int, duration time.Duration) {
+// auditRole normalizes the resolved caller role for audit logging: the
+// static admin token resolves to role == "" (ADR-028's authorizeToken), which
+// is logged as "x-mcp" (matching the pre-ADR-028 audit identity) rather than
+// an empty string; a role-bound session token logs its actual role so audit
+// lines can distinguish which role performed a call/block.
+func auditRole(role string) string {
+	if role == "" {
+		return "x-mcp"
+	}
+	return role
+}
+
+func (h *Handler) auditBlock(role, toolName, reason string) {
+	if h.logger == nil {
+		return
+	}
+	h.logger.Log(audit.Event{
+		Role:     auditRole(role),
+		ToolName: toolName,
+		Decision: "block",
+		Reason:   reason,
+	})
+}
+
+func (h *Handler) audit(role, toolName string, upstreamStatus int, duration time.Duration) {
 	if h.logger == nil {
 		return
 	}
@@ -733,7 +862,7 @@ func (h *Handler) audit(toolName string, upstreamStatus int, duration time.Durat
 		reason = "upstream_status=" + strconv.Itoa(upstreamStatus) + " " + reason
 	}
 	h.logger.Log(audit.Event{
-		Role:     "x-mcp",
+		Role:     auditRole(role),
 		ToolName: toolName,
 		Decision: "allow",
 		Reason:   reason,

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/subtle"
+	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/jqmcp"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/jquants"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/session"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/slacknotify"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/tools"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/xmcp"
@@ -57,11 +62,17 @@ func main() {
 	logger := audit.NewLogger(os.Stdout)
 	handler := tools.NewHandler(policy.NewDevEngine(), logger)
 
+	// ADR-028: a single shared session.Store backs both /session/issue (mint)
+	// and the /mcp + /git consumers (resolve/validate), so one minted token
+	// works across both surfaces.
+	sessionStore := session.NewStore(sessionStoreOptionsFromEnv()...)
+
 	mux := http.NewServeMux()
 	mux.Handle("/", handler.Routes())
-	mountGitRelay(mux, logger)
-	mountXMCP(mux, logger)
+	mountGitRelay(mux, logger, sessionStore)
+	mountXMCP(mux, logger, sessionStore)
 	mountSlackNotify(mux, logger)
+	mountSessionIssue(mux, sessionStore)
 
 	log.Printf("auth-proxy listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -72,7 +83,7 @@ func main() {
 // mountGitRelay wires the git Smart HTTP relay (ADR-020) only when a session
 // token is configured and GitHub App credentials are available; otherwise it
 // logs a non-sensitive reason and leaves the tools routes serving alone.
-func mountGitRelay(mux *http.ServeMux, logger *audit.Logger) {
+func mountGitRelay(mux *http.ServeMux, logger *audit.Logger, store *session.Store) {
 	sessionToken := os.Getenv("AUTH_PROXY_SESSION_TOKEN")
 	if sessionToken == "" {
 		log.Printf("git relay disabled: no session token configured")
@@ -91,6 +102,7 @@ func mountGitRelay(mux *http.ServeMux, logger *audit.Logger) {
 		log.Printf("git relay disabled: handler construction failed")
 		return
 	}
+	relay = relay.WithSession(store)
 
 	mux.Handle("/git/", relay.Routes())
 }
@@ -100,7 +112,7 @@ func mountGitRelay(mux *http.ServeMux, logger *audit.Logger) {
 // (x-mcp-readonly tools) or JQUANTS_REFRESH_TOKEN (jq.* tools, ADR-027) is
 // available. The tools/list output reflects whichever credentials are
 // actually configured: X only, J-Quants only, or both.
-func mountXMCP(mux *http.ServeMux, logger *audit.Logger) {
+func mountXMCP(mux *http.ServeMux, logger *audit.Logger, store *session.Store) {
 	sessionToken := os.Getenv("AUTH_PROXY_SESSION_TOKEN")
 	if sessionToken == "" {
 		log.Printf("x-mcp disabled: AUTH_PROXY_SESSION_TOKEN not set")
@@ -130,7 +142,80 @@ func mountXMCP(mux *http.ServeMux, logger *audit.Logger) {
 		log.Printf("x-mcp disabled: handler construction failed")
 		return
 	}
+	// ADR-028: role×tool enforcement + tools/list filtering + hard call cap
+	// for role-bound session tokens (static admin token keeps full access).
+	handler = handler.WithSession(store, policy.NewDevEngine())
 	mux.Handle("/mcp", handler.Routes())
+}
+
+// sessionStoreOptionsFromEnv builds session.Store options from environment
+// variables (ADR-028): AUTH_PROXY_MCP_CALL_CAP overrides the default
+// per-token /mcp tools/call cap.
+func sessionStoreOptionsFromEnv() []session.Option {
+	var opts []session.Option
+	if raw := os.Getenv("AUTH_PROXY_MCP_CALL_CAP"); raw != "" {
+		if cap, err := strconv.Atoi(raw); err == nil && cap > 0 {
+			opts = append(opts, session.WithCallCap(cap))
+		} else {
+			log.Printf("AUTH_PROXY_MCP_CALL_CAP invalid, using default: %q", raw)
+		}
+	}
+	return opts
+}
+
+// mountSessionIssue mounts POST /session/issue (ADR-028): the admin/mint
+// endpoint used by the orchestrator (which alone holds the static
+// AUTH_PROXY_SESSION_TOKEN) to mint short-lived, role-bound session tokens.
+// Always mounted when AUTH_PROXY_SESSION_TOKEN is set.
+func mountSessionIssue(mux *http.ServeMux, store *session.Store) {
+	sessionToken := os.Getenv("AUTH_PROXY_SESSION_TOKEN")
+	if sessionToken == "" {
+		log.Printf("session/issue disabled: no session token configured")
+		return
+	}
+	mux.HandleFunc("POST /session/issue", handleSessionIssue(sessionToken, store))
+}
+
+type sessionIssueRequest struct {
+	Role string `json:"role"`
+}
+
+type sessionIssueResponse struct {
+	Token      string `json:"token"`
+	TTLSeconds int    `json:"ttl_seconds"`
+}
+
+func handleSessionIssue(staticToken string, store *session.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "Bearer "
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, prefix) || subtle.ConstantTimeCompare([]byte(auth[len(prefix):]), []byte(staticToken)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		var req sessionIssueRequest
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &req); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+		}
+		if req.Role == "" {
+			http.Error(w, "role is required", http.StatusBadRequest)
+			return
+		}
+
+		token, ttl := store.Issue(req.Role)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(sessionIssueResponse{Token: token, TTLSeconds: int(ttl.Seconds())})
+	}
 }
 
 // mountSlackNotify mounts POST /v1/slack/notify (ADR-026) only when

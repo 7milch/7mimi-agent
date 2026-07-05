@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/session"
 )
 
 const testSessionToken = "test-session-token-abc123"
@@ -355,5 +359,69 @@ func TestUpstreamErrorIsErrorWithoutTokenLeak(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), fakeToken) {
 		t.Fatalf("response leaked bearer token: %s", rec.Body.String())
+	}
+}
+
+// --- ADR-028: audit events must record the resolved role, not a hard-coded
+// "x-mcp" constant, once role-bound session tokens are in play. ---
+
+func TestAuditRecordsResolvedRoleForRoleBoundToken(t *testing.T) {
+	var buf bytes.Buffer
+	logger := audit.NewLogger(&buf)
+	store := session.NewStore()
+	defer store.Close()
+	engine := policy.NewDevEngine()
+
+	// A fake jq.* extra tool must be registered so this exercises the
+	// role-denied-but-registered path (see the comment on Decide() in
+	// handleToolsCall): jq.* is denied for ai_it_topic_runner by policy, but
+	// only reaches Decide() if the tool actually exists in the table.
+	fakeJQTool := ExtraTool{
+		Tool:    Tool{Name: "jq.get_listed_info", Description: "fake", InputSchema: map[string]any{"type": "object"}},
+		Handler: func(map[string]any) ToolResult { return NewTextResult("{}", 200) },
+	}
+	h, err := NewHandlerWithSession(testSessionToken, logger, true, store, engine, fakeJQTool)
+	if err != nil {
+		t.Fatalf("NewHandlerWithSession: %v", err)
+	}
+	token, _ := store.Issue("ai_it_topic_runner")
+
+	rec := postJSONWithBearer(t, h, token, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jq.get_listed_info","arguments":{}}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var event map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &event); err != nil {
+		t.Fatalf("decode audit event: %v, raw=%s", err, buf.String())
+	}
+	if event["role"] != "ai_it_topic_runner" {
+		t.Errorf("role = %v, want ai_it_topic_runner (denied jq.* call must be audited under the resolved role)", event["role"])
+	}
+	if event["decision"] != "block" {
+		t.Errorf("decision = %v, want block", event["decision"])
+	}
+}
+
+func TestAuditRecordsXMcpForStaticToken(t *testing.T) {
+	var buf bytes.Buffer
+	logger := audit.NewLogger(&buf)
+	t.Setenv("X_BEARER_TOKEN", "fake-token")
+	h, err := NewHandler(testSessionToken, logger)
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+
+	rec := postJSON(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x.get_users","arguments":{"ids":["1"]}}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var event map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &event); err != nil {
+		t.Fatalf("decode audit event: %v, raw=%s", err, buf.String())
+	}
+	if event["role"] != "x-mcp" {
+		t.Errorf("role = %v, want x-mcp (static/admin token path)", event["role"])
 	}
 }

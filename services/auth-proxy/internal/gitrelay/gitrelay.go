@@ -20,6 +20,7 @@ import (
 
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/githubapp"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/session"
 )
 
 const defaultUpstream = "https://github.com"
@@ -32,6 +33,7 @@ type Handler struct {
 	tokens       *githubapp.TokenSource
 	upstream     string
 	logger       *audit.Logger
+	store        *session.Store
 }
 
 // NewHandler builds the relay handler. sessionToken must be non-empty
@@ -51,6 +53,15 @@ func NewHandler(sessionToken string, tokens *githubapp.TokenSource, upstream str
 	}, nil
 }
 
+// WithSession attaches a session.Store (ADR-028) so tokens minted via
+// POST /session/issue are also accepted here: git relay only cares about
+// token validity, not the bound role, since one minted token is meant to be
+// usable for both /mcp and /git.
+func (h *Handler) WithSession(store *session.Store) *Handler {
+	h.store = store
+	return h
+}
+
 // Routes registers the relay's HTTP routes on a mux.
 func (h *Handler) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
@@ -64,13 +75,22 @@ func (h *Handler) Routes() *http.ServeMux {
 func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) bool {
 	const prefix = "Bearer "
 	auth := r.Header.Get("Authorization")
-	ok := strings.HasPrefix(auth, prefix) &&
-		subtle.ConstantTimeCompare([]byte(auth[len(prefix):]), []byte(h.sessionToken)) == 1
-	if !ok {
+	if !strings.HasPrefix(auth, prefix) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	return true
+	token := auth[len(prefix):]
+	if subtle.ConstantTimeCompare([]byte(token), []byte(h.sessionToken)) == 1 {
+		return true
+	}
+	// ADR-028: a role-bound session token minted via POST /session/issue is
+	// also valid here (validity only, no role check -- git relay has no
+	// tool-level distinctions to enforce).
+	if h.store != nil && h.store.Valid(token) {
+		return true
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	return false
 }
 
 func validOwnerRepo(owner, repo string) bool {
