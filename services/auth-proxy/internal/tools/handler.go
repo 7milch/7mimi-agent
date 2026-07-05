@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/audit"
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/policy"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
 )
 
 // AuthorizeRequest is the PreToolUse payload sent by agent-runner hooks.

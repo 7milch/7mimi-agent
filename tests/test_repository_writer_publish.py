@@ -9,7 +9,7 @@ from shichimimi_agent.documents.repository_writer import DocumentRepositoryWrite
 
 DOCUMENT_REPOSITORIES = {
     "ai_it_research_notes": {
-        "repo": "nishiog/ai-it-research-notes",
+        "repo": "7milch/ai-it-research-notes",
         "allowed_paths": ["daily/**", "weekly/**", "topics/**", "queue/**"],
         "denied_paths": [".github/**", ".env", ".env.*", "secrets/**", "config/**"],
     }
@@ -78,7 +78,7 @@ class DocumentRepositoryWriterPublishTest(unittest.TestCase):
 
     def test_publish_clones_writes_commits_and_pushes(self) -> None:
         result = self.writer.publish(
-            repo="nishiog/ai-it-research-notes",
+            repo="7milch/ai-it-research-notes",
             relative_path="daily/2026/07/2026-07-05.md",
             content="# Digest\n",
             commit_message="docs: daily AI/IT digest 2026-07-05 (7mimi-agent)",
@@ -87,7 +87,7 @@ class DocumentRepositoryWriterPublishTest(unittest.TestCase):
 
         self.assertTrue(result.pushed)
         self.assertIsNotNone(result.commit_sha)
-        self.assertEqual(result.repo, "nishiog/ai-it-research-notes")
+        self.assertEqual(result.repo, "7milch/ai-it-research-notes")
 
         content, log = self._clone_and_read("daily/2026/07/2026-07-05.md")
         self.assertEqual(content, "# Digest\n")
@@ -96,7 +96,7 @@ class DocumentRepositoryWriterPublishTest(unittest.TestCase):
 
     def test_second_publish_with_identical_content_does_not_push(self) -> None:
         kwargs = dict(
-            repo="nishiog/ai-it-research-notes",
+            repo="7milch/ai-it-research-notes",
             relative_path="daily/2026/07/2026-07-05.md",
             content="# Digest\n",
             commit_message="docs: daily AI/IT digest 2026-07-05 (7mimi-agent)",
@@ -112,7 +112,7 @@ class DocumentRepositoryWriterPublishTest(unittest.TestCase):
     def test_denied_path_raises_permission_error_and_writes_nothing(self) -> None:
         with self.assertRaises(PermissionError):
             self.writer.publish(
-                repo="nishiog/ai-it-research-notes",
+                repo="7milch/ai-it-research-notes",
                 relative_path=".github/workflows/evil.yml",
                 content="malicious",
                 commit_message="evil",
@@ -127,7 +127,7 @@ class DocumentRepositoryWriterPublishTest(unittest.TestCase):
 
         with self.assertRaises(RuntimeError) as ctx:
             writer.publish(
-                repo="nishiog/ai-it-research-notes",
+                repo="7milch/ai-it-research-notes",
                 relative_path="daily/2026/07/2026-07-05.md",
                 content="# Digest\n",
                 commit_message="docs",

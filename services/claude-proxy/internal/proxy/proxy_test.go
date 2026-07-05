@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/audit"
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/config"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/config"
 )
 
 const testAPIKey = "sk-ant-test-secret-key"

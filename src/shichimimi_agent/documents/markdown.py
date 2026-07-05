@@ -31,7 +31,7 @@ def render_ai_it_daily_digest(*, queries: list[str], items: list[TopicDigestItem
     for q in queries:
         lines.append(f"  - {q!r}")
     lines.extend([
-        "source_repo: nishiog/ai-it-research-notes",
+        "source_repo: 7milch/ai-it-research-notes",
         "---",
         "",
         f"# Daily AI/IT Digest - {today}",

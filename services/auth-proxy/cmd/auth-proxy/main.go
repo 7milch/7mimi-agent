@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/audit"
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/policy"
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/tools"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/tools"
 )
 
 func main() {

@@ -159,7 +159,7 @@ mcp_servers:
     path_policy:
       allowed_roots:
         - .data/generated
-        - external:github:nishiog/ai-it-research-notes
+        - external:github:7milch/ai-it-research-notes
       deny_paths:
         - .env
         - .env.*
@@ -181,7 +181,7 @@ mcp_servers:
 
 document_repositories:
   ai_it_research_notes:
-    repo: nishiog/ai-it-research-notes
+    repo: 7milch/ai-it-research-notes
     visibility: public
     purpose: AI/IT topic daily digests and topic notes generated from X signals and verified web sources.
     write_mode: direct_push

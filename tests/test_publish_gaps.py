@@ -13,7 +13,7 @@ from shichimimi_agent.security.path_policy import is_path_allowed
 
 DOCUMENT_REPOSITORIES = {
     "ai_it_research_notes": {
-        "repo": "nishiog/ai-it-research-notes",
+        "repo": "7milch/ai-it-research-notes",
         "allowed_paths": ["daily/**", "weekly/**", "topics/**", "queue/**"],
         "denied_paths": [".github/**", ".env", ".env.*", "secrets/**", "config/**"],
     }
@@ -164,7 +164,7 @@ class RepositoryWriterGitLifecycleTest(unittest.TestCase):
         checkout_dir = self.root / ".data" / "notes-repo" / "ai-it-research-notes"
 
         self.writer.publish(
-            repo="nishiog/ai-it-research-notes",
+            repo="7milch/ai-it-research-notes",
             relative_path="daily/2026/07/2026-07-05.md",
             content="# Digest 1\n",
             commit_message="docs: day 1",
@@ -176,7 +176,7 @@ class RepositoryWriterGitLifecycleTest(unittest.TestCase):
         # Second publish call, different content -> should pull --ff-only
         # against the existing checkout rather than re-cloning.
         second = self.writer.publish(
-            repo="nishiog/ai-it-research-notes",
+            repo="7milch/ai-it-research-notes",
             relative_path="daily/2026/07/2026-07-06.md",
             content="# Digest 2\n",
             commit_message="docs: day 2",
@@ -193,7 +193,7 @@ class RepositoryWriterGitLifecycleTest(unittest.TestCase):
     def test_publish_with_dot_dot_traversal_raises_permission_error_and_writes_nothing(self) -> None:
         with self.assertRaises(PermissionError):
             self.writer.publish(
-                repo="nishiog/ai-it-research-notes",
+                repo="7milch/ai-it-research-notes",
                 relative_path="daily/../.github/evil.yml",
                 content="malicious",
                 commit_message="evil",
@@ -209,7 +209,7 @@ class RepositoryWriterGitLifecycleTest(unittest.TestCase):
     def test_push_failure_after_remote_removed_raises_scrubbed_runtime_error(self) -> None:
         # First publish succeeds and creates the checkout + remote tracking.
         self.writer.publish(
-            repo="nishiog/ai-it-research-notes",
+            repo="7milch/ai-it-research-notes",
             relative_path="daily/2026/07/2026-07-05.md",
             content="# Digest\n",
             commit_message="docs: day 1",
@@ -230,7 +230,7 @@ class RepositoryWriterGitLifecycleTest(unittest.TestCase):
 
         with self.assertRaises(RuntimeError) as ctx:
             self.writer.publish(
-                repo="nishiog/ai-it-research-notes",
+                repo="7milch/ai-it-research-notes",
                 relative_path="daily/2026/07/2026-07-06.md",
                 content="# Digest 2\n",
                 commit_message="docs: day 2",
@@ -296,7 +296,7 @@ class ResolvedPathContainmentTest(unittest.TestCase):
         ):
             with self.assertRaises(PermissionError):
                 self.writer.publish(
-                    repo="nishiog/ai-it-research-notes",
+                    repo="7milch/ai-it-research-notes",
                     relative_path="../../etc/evil.md",
                     content="malicious",
                     commit_message="evil",

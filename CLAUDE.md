@@ -44,7 +44,7 @@ Only runtime dependency is PyYAML. Tests use stdlib `unittest` (pytest config ex
 
 ## Architecture
 
-MCP-first autonomous research agent (inspired by Mercari's remote-claude / pcp-agent). It collects AI/IT topics and Japanese stock signals from X, fact-checks them, and writes Markdown digests — generated notes go to a separate repo (`nishiog/ai-it-research-notes`), never into this repo.
+MCP-first autonomous research agent (inspired by Mercari's remote-claude / pcp-agent). It collects AI/IT topics and Japanese stock signals from X, fact-checks them, and writes Markdown digests — generated notes go to a separate repo (`7milch/ai-it-research-notes`), never into this repo.
 
 ### Directory Structure
 

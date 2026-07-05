@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/audit"
-	"github.com/nishiog/7mimi-agent/services/auth-proxy/internal/policy"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
 )
 
 func authorize(t *testing.T, body string) map[string]any {

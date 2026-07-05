@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/audit"
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/config"
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/proxy"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/config"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/proxy"
 )
 
 func main() {

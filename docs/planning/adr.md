@@ -56,8 +56,10 @@ Reason: Claude provider credential と、X/J-Quants/Document Store 等の外部A
 
 ### ADR-011: Dedicated public repository for AI/IT generated notes
 
-Decision: X由来のAI/IT topic digestやtopic notesは、agent本体のrepositoryではなく `nishiog/ai-it-research-notes` に保存する。  
+Decision: X由来のAI/IT topic digestやtopic notesは、agent本体のrepositoryではなく `7milch/ai-it-research-notes` に保存する。  
 Reason: agent system と生成 knowledge を分離し、Git履歴をそのまま knowledge base の更新履歴として扱うため。書き込み権限は document-store / auth-proxy 側に閉じ込め、許可pathを `daily/**`, `weekly/**`, `topics/**`, `queue/**` に限定する。
+
+改訂(2026-07-05): GitHub App 運用の都合により、notes repo と agent 本体 repo を `nishiog` から `7milch` 配下へ transfer した(`7milch/ai-it-research-notes` / `7milch/7mimi-agent`)。Go モジュールパスも `github.com/7milch/7mimi-agent/...` に更新。
 
 ---
 
@@ -100,7 +102,7 @@ Reason: 実 X API は Pay Per Use の課金対象であり、dry-run・テスト
 
 ### ADR-018: notes repo への publish はホスト credential による暫定 local 構成とする
 
-Decision: daily digest の `nishiog/ai-it-research-notes` への publish は、orchestration ホスト上の DocumentRepositoryWriter が `.data/notes-repo/` の git checkout に対して path policy(`document_repositories` の allow/deny glob)を事前強制した上で commit/push する。credential はホストの ambient git/GitHub 認証を使い、agent-runner コンテナには一切渡さない。CLI は `--publish` の明示 opt-in(既定は dry-run)。将来は document-store MCP + auth-proxy に credential を移す(ADR-010 の最終形)。
+Decision: daily digest の `7milch/ai-it-research-notes` への publish は、orchestration ホスト上の DocumentRepositoryWriter が `.data/notes-repo/` の git checkout に対して path policy(`document_repositories` の allow/deny glob)を事前強制した上で commit/push する。credential はホストの ambient git/GitHub 認証を使い、agent-runner コンテナには一切渡さない。CLI は `--publish` の明示 opt-in(既定は dry-run)。将来は document-store MCP + auth-proxy に credential を移す(ADR-010 の最終形)。
 
 Reason: roadmap の「digest を notes repo に push する縦切り」を最小構成で成立させるため。書き込み先制限は LLM の外側の決定的 path policy で担保し、ホスト credential の利用は local 実行(LocalRunnerBackend)に限定することで、コンテナ境界の credential 不在原則(ADR-010/013)を維持する。
 

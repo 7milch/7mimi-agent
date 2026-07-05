@@ -90,7 +90,7 @@ jobs:
     inputs:
       query_set: ai_it_watch
       max_posts_per_query: 50
-      output_repo: nishiog/ai-it-research-notes
+      output_repo: 7milch/ai-it-research-notes
       output_branch: main
     prompt: |
       XからAI/IT関連Topicを収集してください。
@@ -100,7 +100,7 @@ jobs:
       Markdownのdaily digestを生成し、専用docs repositoryへ保存してください。
     output:
       type: github_markdown_repo
-      repo: nishiog/ai-it-research-notes
+      repo: 7milch/ai-it-research-notes
       path_template: "daily/{yyyy}/{mm}/{date}.md"
       commit_message_template: "Add AI/IT daily digest for {date}"
 

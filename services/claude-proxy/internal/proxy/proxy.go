@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/audit"
-	"github.com/nishiog/7mimi-agent/services/claude-proxy/internal/config"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/audit"
+	"github.com/7milch/7mimi-agent/services/claude-proxy/internal/config"
 )
 
 const defaultAnthropicVersion = "2023-06-01"

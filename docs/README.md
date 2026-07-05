@@ -45,8 +45,8 @@ Owner: 7milch
 
 ## Related repositories
 
-- Agent system: `nishiog/7mimi-agent`
-- Generated AI/IT notes: `nishiog/ai-it-research-notes`
+- Agent system: `7milch/7mimi-agent`
+- Generated AI/IT notes: `7milch/ai-it-research-notes`
 
 ## Documentation policy
 
@@ -54,4 +54,4 @@ Owner: 7milch
 - 実行時設定は `config/*.yaml` を正とする。
 - ADR は `docs/planning/adr.md` に追記する。
 - 実装レベルの詳細は `docs/detailed-design/README.md` に集約する。
-- 生成される調査Markdownは `nishiog/ai-it-research-notes` に置き、agent本体repoには置かない。
+- 生成される調査Markdownは `7milch/ai-it-research-notes` に置き、agent本体repoには置かない。

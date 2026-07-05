@@ -213,10 +213,10 @@ Official docs / GitHub / release notes / primary sources are preferred evidence.
 生成物は `7mimi-agent` repository には置かず、専用 repository に保存する。
 
 ```text
-nishiog/7mimi-agent:
+7milch/7mimi-agent:
   agent system, policy, roles, schedules, implementation
 
-nishiog/ai-it-research-notes:
+7milch/ai-it-research-notes:
   generated AI/IT research notes, daily digests, topic notes, research queue
 ```
 
@@ -309,7 +309,7 @@ compose Markdown daily digest
   ↓
 redaction + source check
   ↓
-document-store writes and pushes to nishiog/ai-it-research-notes
+document-store writes and pushes to 7milch/ai-it-research-notes
 ```
 
 ### 12.6 Guardrails

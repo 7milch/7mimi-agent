@@ -650,7 +650,7 @@ runner に渡す入力は以下。
   "outputs": [
     {
       "type": "markdown_document",
-      "repo": "nishiog/ai-it-research-notes",
+      "repo": "7milch/ai-it-research-notes",
       "path": "daily/2026/07/2026-07-04.md",
       "title": "Daily AI/IT Digest - 2026-07-04"
     }
@@ -1013,7 +1013,7 @@ Document write request:
 
 ```json
 {
-  "repo": "nishiog/ai-it-research-notes",
+  "repo": "7milch/ai-it-research-notes",
   "branch": "main",
   "path": "daily/2026/07/2026-07-04.md",
   "content": "...",
@@ -1042,7 +1042,7 @@ Document write request:
 8. classify source quality
 9. compose daily digest markdown
 10. run source/ref/redaction checks
-11. write and push to nishiog/ai-it-research-notes
+11. write and push to 7milch/ai-it-research-notes
 12. record document and metrics
 ```
 
@@ -1099,7 +1099,7 @@ source_policy: x_is_signal_not_evidence
 queries:
   - '"AI agent" MCP'
   - '"Claude Code"'
-source_repo: nishiog/ai-it-research-notes
+source_repo: 7milch/ai-it-research-notes
 ---
 ```
 
@@ -1155,7 +1155,7 @@ source_repo: nishiog/ai-it-research-notes
 Direct push is allowed only when all checks pass:
 
 ```text
-- target repo == nishiog/ai-it-research-notes
+- target repo == 7milch/ai-it-research-notes
 - target path matches daily/**, weekly/**, topics/**, queue/**, or README.md
 - target path does not match denied paths
 - redaction check passes
@@ -1278,7 +1278,7 @@ Document Store maintains working copies under `.data/repos/`.
 
 ```text
 .data/repos/
-  github.com/nishiog/ai-it-research-notes/
+  github.com/7milch/ai-it-research-notes/
 ```
 
 This directory is gitignored.
@@ -1310,7 +1310,7 @@ If push fails due non-fast-forward:
 
 - GitHub token is held by document-store/auth-proxy side only
 - agent-runner never receives token
-- token scope should be limited to `nishiog/ai-it-research-notes`
+- token scope should be limited to `7milch/ai-it-research-notes`
 - if GitHub App is used, installation should be repo-scoped
 
 ---
@@ -1567,7 +1567,7 @@ Dry-run mode:
 
 - document-store GitHub writer
 - path policy
-- commit/push to `nishiog/ai-it-research-notes`
+- commit/push to `7milch/ai-it-research-notes`
 - source verifier block checks
 
 #### Phase D5: Stock research
@@ -1604,7 +1604,7 @@ Dry-run mode:
 - output does not include bulk X post text
 - denied paths are blocked in tests
 - X write tools are blocked in tests
-- `run-job ai-it-x-daily-digest` can push to `nishiog/ai-it-research-notes/daily/...`
+- `run-job ai-it-x-daily-digest` can push to `7milch/ai-it-research-notes/daily/...`
 - commit SHA is recorded in SQLite
 
 #### Stock research MVP is done when

@@ -66,7 +66,7 @@ class AiItTopicRunnerAuthWiringTest(unittest.TestCase):
         job = {
             "role": "ai_it_topic_runner",
             "inputs": {"query_set": "ai_it_watch"},
-            "output": {"repo": "nishiog/ai-it-research-notes"},
+            "output": {"repo": "7milch/ai-it-research-notes"},
         }
 
         with mock.patch("urllib.request.urlopen") as urlopen:

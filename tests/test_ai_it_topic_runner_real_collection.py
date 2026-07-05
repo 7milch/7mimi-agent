@@ -74,7 +74,7 @@ class AiItTopicRunnerRealCollectionTest(unittest.TestCase):
         return {
             "role": "ai_it_topic_runner",
             "inputs": {"query_set": "ai_it_watch"},
-            "output": {"repo": "nishiog/ai-it-research-notes"},
+            "output": {"repo": "7milch/ai-it-research-notes"},
         }
 
     def _queries(self) -> list[str]:
@@ -271,7 +271,7 @@ class AiItTopicRunnerLlmSummaryTest(unittest.TestCase):
         return {
             "role": "ai_it_topic_runner",
             "inputs": {"query_set": "ai_it_watch"},
-            "output": {"repo": "nishiog/ai-it-research-notes"},
+            "output": {"repo": "7milch/ai-it-research-notes"},
         }
 
     def _queries(self) -> list[str]:

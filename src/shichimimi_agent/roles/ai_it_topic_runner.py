@@ -65,7 +65,7 @@ class AiItTopicRunner:
 
         date = now_jst().date()
         relative_path = f"daily/{date:%Y}/{date:%m}/{date.isoformat()}.md"
-        repo = (job.get("output") or {}).get("repo", "nishiog/ai-it-research-notes")
+        repo = (job.get("output") or {}).get("repo", "7milch/ai-it-research-notes")
 
         decision = run_pre_tool_use(
             self.auth_client,

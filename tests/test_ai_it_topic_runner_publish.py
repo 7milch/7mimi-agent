@@ -40,7 +40,7 @@ class AiItTopicRunnerPublishTest(unittest.TestCase):
         self.job = {
             "role": "ai_it_topic_runner",
             "inputs": {"query_set": "ai_it_watch"},
-            "output": {"repo": "nishiog/ai-it-research-notes"},
+            "output": {"repo": "7milch/ai-it-research-notes"},
         }
 
     def tearDown(self) -> None:

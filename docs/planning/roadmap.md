@@ -130,7 +130,7 @@
 5. X MCP read-only で1クエリ取得する
 6. J-Quants MCP で1銘柄取得する
 7. `research_queue -> stock memo` の縦切りを作る
-8. AI/IT daily digest を `nishiog/ai-it-research-notes` にpushする縦切りを作る
+8. AI/IT daily digest を `7milch/ai-it-research-notes` にpushする縦切りを作る
 
 ---
 

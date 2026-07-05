@@ -8,7 +8,7 @@ Documentation starts here:
 
 Related generated notes repository:
 
-- https://github.com/nishiog/ai-it-research-notes
+- https://github.com/7milch/ai-it-research-notes
 
 ## Current implementation status
 
