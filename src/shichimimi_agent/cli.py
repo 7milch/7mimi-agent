@@ -52,6 +52,77 @@ def cmd_schedule_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_scheduler_executors(config: Any, repository: Repository) -> dict[str, Any]:
+    """Wire executors for jobs with an implemented run path (ADR-022).
+
+    Only "ai-it-x-daily-digest" has an executor today (the claude-digest
+    pipeline). Other jobs have no executor and are skipped by the engine.
+    """
+    import os
+
+    from shichimimi_agent.runner.claude_digest import ClaudeDigestOptions, run_claude_digest
+    from shichimimi_agent.sessions.workspace import create_workspace
+
+    required_env = ["X_MCP_URL", "CLAUDE_PROXY_URL", "CLAUDE_PROXY_SESSION_TOKEN", "GIT_PROXY_URL", "GIT_PROXY_SESSION_TOKEN"]
+
+    def _run_ai_it_x_daily_digest(job: dict[str, Any]) -> None:
+        missing = [name for name in required_env if not os.environ.get(name)]
+        if missing:
+            raise RuntimeError(f"required env missing: {', '.join(missing)}")
+
+        role = job["role"]
+        role_config = ((config.roles or {}).get("roles") or {}).get(role) or {}
+        model = resolve_model(role_config, config.policy)
+
+        session_id = repository.create_session(source="scheduler", role=role, workspace_path="")
+        workspace = create_workspace(config.root, session_id)
+        repository.update_session_status(session_id, "running")
+        task_id = repository.create_task(session_id=session_id, role=role, input_data={"job": job})
+
+        result = run_claude_digest(
+            config=config,
+            repository=repository,
+            session_id=session_id,
+            task_id=task_id,
+            workspace=workspace,
+            job=job,
+            options=ClaudeDigestOptions(model=model),
+        )
+
+        if result.exit_code == 0:
+            repository.finish_task(task_id, status="succeeded", output={"path": result.verified_path, "commit_sha": result.commit_sha})
+            repository.update_session_status(session_id, "stopped")
+        else:
+            repository.finish_task(task_id, status="failed", error={"type": "ClaudeDigestError", "message": "digest run or verification failed"})
+            repository.update_session_status(session_id, "failed")
+            raise RuntimeError("claude-digest run failed or verification failed")
+
+    return {"ai-it-x-daily-digest": _run_ai_it_x_daily_digest}
+
+
+def cmd_schedule_run(args: argparse.Namespace) -> int:
+    from shichimimi_agent.scheduler.engine import SchedulerEngine
+
+    try:
+        config = _load_validated_config(args.root)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    migrate(default_db_path(config.root))
+    repository = Repository.for_root(config.root)
+    executors = _build_scheduler_executors(config, repository)
+    engine = SchedulerEngine(config=config, repository=repository, executors=executors)
+
+    if args.once:
+        results = engine.run_once()
+        for result in results:
+            print(f"{result.job_name}\tstatus={result.status}\treason={result.reason}")
+        return 0
+
+    engine.run_forever()
+    return 0
+
+
 def _find_job(config: Any, name: str) -> dict[str, Any]:
     for job in config.schedules.get("jobs") or []:
         if job.get("name") == name:
@@ -323,6 +394,10 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_sub = schedule.add_subparsers(dest="schedule_command", required=True)
     list_cmd = schedule_sub.add_parser("list")
     list_cmd.set_defaults(func=cmd_schedule_list)
+
+    run_cmd = schedule_sub.add_parser("run")
+    run_cmd.add_argument("--once", action="store_true", default=False)
+    run_cmd.set_defaults(func=cmd_schedule_run)
 
     run_job = sub.add_parser(
         "run-job",

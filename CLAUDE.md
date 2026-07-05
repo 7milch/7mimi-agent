@@ -16,6 +16,9 @@ PYTHONPATH=src python3 -m shichimimi_agent db init
 # List scheduled jobs from config/schedules.yaml
 PYTHONPATH=src python3 -m shichimimi_agent schedule list
 
+# Run due jobs once via the cron scheduler engine (ADR-022); omit --once for the resident loop
+PYTHONPATH=src python3 -m shichimimi_agent schedule run --once
+
 # Run a job (dry-run output goes to .data/dry-run/, gitignored)
 PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-run
 
