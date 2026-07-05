@@ -77,6 +77,7 @@ class PartialQueryFailureTest(unittest.TestCase):
         self.auth_client = AuthProxyClient(local_fallback_engine=PolicyEngine(self.config.policy))
         self._env_backup = dict(os.environ)
         os.environ["X_MCP_URL"] = "http://x-mcp.local"
+        os.environ["X_MCP_SESSION_TOKEN"] = "test-x-mcp-session-token"
 
     def tearDown(self) -> None:
         self._tmpdir.cleanup()
@@ -151,6 +152,7 @@ class RunClaudeDigestEndToEndTest(unittest.TestCase):
 
         self._env_backup = dict(os.environ)
         os.environ["X_MCP_URL"] = "http://x-mcp.local"
+        os.environ["X_MCP_SESSION_TOKEN"] = "test-x-mcp-session-token"
         os.environ["CLAUDE_PROXY_URL"] = "http://host.docker.internal:18080"
         os.environ["CLAUDE_PROXY_SESSION_TOKEN"] = "cp_sess_dev_secret"
         os.environ["GIT_PROXY_URL"] = "http://host.docker.internal:18081"

@@ -69,7 +69,16 @@ def collect_signals(
     if not x_mcp_url:
         raise RuntimeError("X_MCP_URL is not set; cannot collect X signals")
 
-    factory = mcp_client_factory or (lambda base_url: McpHttpClient(base_url=base_url))
+    x_mcp_session_token = os.environ.get("X_MCP_SESSION_TOKEN")
+    if not x_mcp_session_token:
+        raise RuntimeError(
+            "X_MCP_SESSION_TOKEN is not set; cannot collect X signals "
+            "(x-mcp requires the same session Bearer token as the git relay, ADR-023)"
+        )
+
+    factory = mcp_client_factory or (
+        lambda base_url: McpHttpClient(base_url=base_url, session_token=x_mcp_session_token)
+    )
     client: McpHttpClient | None = None
     query_results: list[dict[str, Any]] = []
     failed_queries: list[str] = []

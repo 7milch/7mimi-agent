@@ -10,6 +10,7 @@ import (
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/gitrelay"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/policy"
 	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/tools"
+	"github.com/7milch/7mimi-agent/services/auth-proxy/internal/xmcp"
 )
 
 func main() {
@@ -23,6 +24,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", handler.Routes())
 	mountGitRelay(mux, logger)
+	mountXMCP(mux, logger)
 
 	log.Printf("auth-proxy listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -54,4 +56,28 @@ func mountGitRelay(mux *http.ServeMux, logger *audit.Logger) {
 	}
 
 	mux.Handle("/git/", relay.Routes())
+}
+
+// mountXMCP mounts the x-mcp-readonly MCP endpoint (ADR-023) only when both
+// X_BEARER_TOKEN (the X API credential) and AUTH_PROXY_SESSION_TOKEN (the
+// same session Bearer that protects gitrelay) are configured; otherwise it
+// logs which one is missing and leaves /mcp unmounted.
+func mountXMCP(mux *http.ServeMux, logger *audit.Logger) {
+	xBearerToken := os.Getenv("X_BEARER_TOKEN")
+	sessionToken := os.Getenv("AUTH_PROXY_SESSION_TOKEN")
+	if xBearerToken == "" {
+		log.Printf("x-mcp disabled: X_BEARER_TOKEN not set")
+		return
+	}
+	if sessionToken == "" {
+		log.Printf("x-mcp disabled: AUTH_PROXY_SESSION_TOKEN not set")
+		return
+	}
+
+	handler, err := xmcp.NewHandler(sessionToken, logger)
+	if err != nil {
+		log.Printf("x-mcp disabled: handler construction failed")
+		return
+	}
+	mux.Handle("/mcp", handler.Routes())
 }

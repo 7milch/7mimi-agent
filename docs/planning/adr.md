@@ -88,6 +88,8 @@ Decision: X API アクセス用の `x-mcp-readonly` は、MCP プロトコル(JS
 
 Reason: ADR-012 の Go 化対象は reverse-proxy 型の境界サービス(claude-proxy / auth-proxy)であり、x-mcp-readonly はデータ収集サービスなので Python 側(research/orchestration 領域)に置く。最初から MCP プロトコルに準拠することで、将来 Claude Code / 他 MCP クライアントから直接接続でき、独自 HTTP API からの移行コストを避けられる。credential をサーバ env のみに置くのは ADR-010 の credential 分離原則(X credential は auth-proxy または各 MCP server のみが保持)に従うため。
 
+改訂(2026-07-05): ADR-023 により x-mcp-readonly は auth-proxy(Go)へ統合した。本 ADR の Python 実装は撤去済み。
+
 ### ADR-016: Model 選択は config 駆動のソフト制御とする
 
 Decision: 実行 model は `config/policy.yaml` の `model_policy.default_model`(既定: `claude-sonnet-5`)と `config/roles.yaml` の role 別 `model:` フィールド(role.model > default_model の優先順)で決定し、agent-runner コンテナへは `ANTHROPIC_MODEL` 環境変数として注入する(Claude Code は標準でこの env を respect する)。claude-proxy での model 強制(拒否・書き換え)は行わない。`model_policy.known_models` にない model 名は config validate 時に warning のみ。claude-smoke は診断用途のため model_policy を経由せず、CLI 既定 `claude-haiku-4-5`(`--model` で上書き可)とする。
@@ -131,3 +133,9 @@ Reason: 収集(x-mcp-readonly)・LLM 境界(claude-proxy)・書き込み境界(g
 Decision: `schedule run` は Python 単一プロセスの常駐ループとして実装する(stdlib のみ、分単位精度、Asia/Tokyo 固定)。ジョブは逐次実行し、`concurrency_policy: forbid` は同一分内の二重発火防止として実装する(単一スレッド逐次実行のため実行の重複はそもそも発生しない)。`active_deadline_seconds` はワーカースレッド + join(timeout) による打ち切り、`backoff_limit` は即時リトライ回数として解釈する。実行結果の DB 記録は executor(実行本体)側の責務とし、スケジューラは発火・リトライ・結果返却のみを行う。executor が登録されたジョブのみ実行し(現時点は `ai-it-x-daily-digest` → claude-digest パイプラインのみ)、未実装 role のジョブは skip として記録する。デーモン化(launchd/systemd)は行わず、プロセス管理はホスト側の責務とする。
 
 Reason: Phase 3(scheduled autonomy)の最小構成として、外部依存なしで cron 定義(config/schedules.yaml)を実行に移すため。ジョブ数が少なく実行時間も分オーダーのため、並列実行・分散実行は現時点で不要。スケジューラの責務を「発火とリトライと記録」に限定し、実行本体は既存の runner 経路(認可・監査・credential 分離済み)に委ねる。
+
+### ADR-023: x-mcp-readonly を auth-proxy に統合し X credential を Go 境界に集約する
+
+Decision: ADR-015 の Python 製 x-mcp-readonly サーバを撤去し、同一の MCP プロトコル契約(JSON-RPC 2.0、`POST /mcp`、read-only 4 tool、21.13.1 正規化、redaction、token 非漏洩)を auth-proxy(Go)の `internal/xmcp` として再実装する。`X_BEARER_TOKEN` は auth-proxy のみが保持し(未設定時は /mcp を mount しない)、X_MCP_URL は auth-proxy(:18081)を指す。Python 側は MCP クライアント(`mcp/client.py`)のみを維持する。/mcp は gitrelay と同一のセッション Bearer(AUTH_PROXY_SESSION_TOKEN、定数時間比較)で保護し、X_BEARER_TOKEN とセッション token の両方が設定された場合のみ mount する。クライアントは X_MCP_SESSION_TOKEN で同 token を送出する。
+
+Reason: credential 保有者を Go 境界サービス(auth-proxy: tool 認可 + git relay + X API)に集約し、監査の一本化と常駐プロセス削減(4→3)を得るため。ADR-015 時点では「データ収集は Python」の整理だったが、実装後の運用で credential 分散と常駐プロセス数の方が支配的な関心事になったため方針を改訂する。正規化・redaction のロジックは小さく、Go 移植のコストより集約の利得が上回ると判断した。

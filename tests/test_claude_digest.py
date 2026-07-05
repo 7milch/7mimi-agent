@@ -85,6 +85,7 @@ class CollectSignalsTest(unittest.TestCase):
         posts_by_query = {q: [_post(f"{i}")] for i, q in enumerate(queries)}
         fake_client = FakeMcpClient("http://x-mcp.local", posts_by_query=posts_by_query)
         os.environ["X_MCP_URL"] = "http://x-mcp.local"
+        os.environ["X_MCP_SESSION_TOKEN"] = "test-x-mcp-session-token"
 
         result = collect_signals(
             auth_client=self.auth_client,
@@ -107,6 +108,7 @@ class CollectSignalsTest(unittest.TestCase):
         queries = self._queries()
         fake_client = FakeMcpClient("http://x-mcp.local", posts_by_query={})
         os.environ["X_MCP_URL"] = "http://x-mcp.local"
+        os.environ["X_MCP_SESSION_TOKEN"] = "test-x-mcp-session-token"
         with self.assertRaises(RuntimeError):
             collect_signals(
                 auth_client=self.auth_client,
@@ -146,6 +148,7 @@ class CollectSignalsTest(unittest.TestCase):
 
         fake_client = FakeMcpClient("http://x-mcp.local", posts_by_query={})
         os.environ["X_MCP_URL"] = "http://x-mcp.local"
+        os.environ["X_MCP_SESSION_TOKEN"] = "test-x-mcp-session-token"
         os.environ["AUTH_PROXY_URL"] = "http://auth-proxy.local"
         auth_client = AuthProxyClient(local_fallback_engine=self.policy_engine)
 

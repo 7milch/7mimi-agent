@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -18,19 +19,25 @@ class McpClientError(Exception):
 class McpHttpClient:
     base_url: str
     timeout_seconds: float = 20.0
+    session_token: str | None = None
 
     def __post_init__(self) -> None:
         self._id_counter = itertools.count(1)
+        if self.session_token is None:
+            self.session_token = os.environ.get("X_MCP_SESSION_TOKEN")
 
     def _endpoint(self) -> str:
         return f"{self.base_url.rstrip('/')}/mcp"
 
     def _post(self, message: dict[str, Any]) -> dict[str, Any] | None:
+        headers = {"Content-Type": "application/json"}
+        if self.session_token:
+            headers["Authorization"] = f"Bearer {self.session_token}"
         request = urllib.request.Request(
             self._endpoint(),
             data=json.dumps(message).encode("utf-8"),
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as resp:

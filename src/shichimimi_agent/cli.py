@@ -63,7 +63,14 @@ def _build_scheduler_executors(config: Any, repository: Repository) -> dict[str,
     from shichimimi_agent.runner.claude_digest import ClaudeDigestOptions, run_claude_digest
     from shichimimi_agent.sessions.workspace import create_workspace
 
-    required_env = ["X_MCP_URL", "CLAUDE_PROXY_URL", "CLAUDE_PROXY_SESSION_TOKEN", "GIT_PROXY_URL", "GIT_PROXY_SESSION_TOKEN"]
+    required_env = [
+        "X_MCP_URL",
+        "X_MCP_SESSION_TOKEN",
+        "CLAUDE_PROXY_URL",
+        "CLAUDE_PROXY_SESSION_TOKEN",
+        "GIT_PROXY_URL",
+        "GIT_PROXY_SESSION_TOKEN",
+    ]
 
     def _run_ai_it_x_daily_digest(job: dict[str, Any]) -> None:
         missing = [name for name in required_env if not os.environ.get(name)]
@@ -292,14 +299,6 @@ def cmd_research_stock(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_mcp_x_readonly(args: argparse.Namespace) -> int:
-    """ADR-015: run the x-mcp-readonly MCP protocol server."""
-    from shichimimi_agent.mcp.x_readonly_server import serve_forever
-
-    serve_forever(host=args.host, port=args.port)
-    return 0
-
-
 def cmd_x_smoke(args: argparse.Namespace) -> int:
     """Connection-test CLI for x-mcp-readonly: authorize then call x.search_posts_recent."""
     import os
@@ -347,8 +346,25 @@ def cmd_x_smoke(args: argparse.Namespace) -> int:
         print(f"error: blocked by policy: {decision.reason}", file=sys.stderr)
         return 1
 
-    mcp_url = args.mcp_url or os.environ.get("X_MCP_URL", "http://127.0.0.1:18082")
-    client = McpHttpClient(base_url=mcp_url)
+    mcp_url = args.mcp_url or os.environ.get("X_MCP_URL", "http://127.0.0.1:18081")
+    mcp_session_token = os.environ.get("X_MCP_SESSION_TOKEN")
+    if not mcp_session_token:
+        repository.finish_task(
+            task_id,
+            status="failed",
+            error={
+                "type": "ConfigurationError",
+                "message": "X_MCP_SESSION_TOKEN is not set; cannot call x-mcp",
+            },
+        )
+        repository.update_session_status(session_id, "failed")
+        print(
+            "error: X_MCP_SESSION_TOKEN is not set (set it to the same value as "
+            "AUTH_PROXY_SESSION_TOKEN)",
+            file=sys.stderr,
+        )
+        return 1
+    client = McpHttpClient(base_url=mcp_url, session_token=mcp_session_token)
     try:
         client.initialize()
         result = client.call_tool(tool_name, arguments)
@@ -431,11 +447,6 @@ def build_parser() -> argparse.ArgumentParser:
     claude_smoke.add_argument("--network", default="bridge")
     claude_smoke.add_argument("--model", default="claude-haiku-4-5")
     claude_smoke.set_defaults(func=cmd_claude_smoke)
-
-    mcp_x_readonly = sub.add_parser("mcp-x-readonly")
-    mcp_x_readonly.add_argument("--host", default="127.0.0.1")
-    mcp_x_readonly.add_argument("--port", type=int, default=18082)
-    mcp_x_readonly.set_defaults(func=cmd_mcp_x_readonly)
 
     x_smoke = sub.add_parser("x-smoke")
     x_smoke.add_argument("--query", default="MCP server")
