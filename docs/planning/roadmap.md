@@ -99,7 +99,7 @@
 - [x] runner image (Dockerfile.agent-runner)
 - [x] one request one container (ContainerRunnerBackend / claude-digest)
 - [x] session workspace (.sessions/<id>/workspace)
-- [ ] resource limits
+- [x] resource limits (--memory/--cpus/--pids-limit on claude-digest/invest-digest docker run, env-tunable via RUNNER_MEMORY/RUNNER_CPUS/RUNNER_PIDS_LIMIT, Issue #27)
 - [x] network restrictions (internal network + egress-proxy、ADR-025)
 - [x] API key separation by MCP container (auth-proxy へ集約、ADR-023)
 

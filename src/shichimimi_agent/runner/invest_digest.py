@@ -94,7 +94,8 @@ class InvestDigestOptions:
     docker_bin: str = "docker"
     network: str = "bridge"
     memory: str = "2g"
-    pids_limit: int = 256
+    cpus: str = "2"
+    pids_limit: int = 512
 
 
 @dataclass(frozen=True)

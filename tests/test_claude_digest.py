@@ -94,6 +94,48 @@ class BuildDockerCommandTest(unittest.TestCase):
         self.assertNotEqual(mount_arg, "/repo:/workspace")
         self.assertTrue(mount_arg.startswith("/repo/.sessions/"))
 
+    def test_resource_limits_default(self) -> None:
+        """Issue #27: container resource limits default to 2g/2 cpus/512 pids
+        when neither an explicit override nor an env var is present."""
+        for key in ("RUNNER_MEMORY", "RUNNER_CPUS", "RUNNER_PIDS_LIMIT"):
+            os.environ.pop(key, None)
+        cmd = self.build()
+        self.assertEqual(cmd[cmd.index("--memory") + 1], "2g")
+        self.assertEqual(cmd[cmd.index("--cpus") + 1], "2")
+        self.assertEqual(cmd[cmd.index("--pids-limit") + 1], "512")
+
+    def test_resource_limits_honor_env_overrides(self) -> None:
+        for key in ("RUNNER_MEMORY", "RUNNER_CPUS", "RUNNER_PIDS_LIMIT"):
+            self.addCleanup(os.environ.pop, key, None)
+        os.environ["RUNNER_MEMORY"] = "4g"
+        os.environ["RUNNER_CPUS"] = "4"
+        os.environ["RUNNER_PIDS_LIMIT"] = "1024"
+        cmd = self.build()
+        self.assertEqual(cmd[cmd.index("--memory") + 1], "4g")
+        self.assertEqual(cmd[cmd.index("--cpus") + 1], "4")
+        self.assertEqual(cmd[cmd.index("--pids-limit") + 1], "1024")
+
+    def test_resource_limits_explicit_args_win_over_env(self) -> None:
+        for key in ("RUNNER_MEMORY", "RUNNER_CPUS", "RUNNER_PIDS_LIMIT"):
+            self.addCleanup(os.environ.pop, key, None)
+        os.environ["RUNNER_MEMORY"] = "4g"
+        os.environ["RUNNER_CPUS"] = "4"
+        os.environ["RUNNER_PIDS_LIMIT"] = "1024"
+        options = ClaudeDigestOptions()
+        cmd = build_docker_command(
+            workspace=Path("/repo/.sessions/sess_x/workspace"),
+            session_id="sess_x",
+            role="ai_it_topic_runner",
+            prompt="do the digest",
+            options=options,
+            memory="1g",
+            cpus="1",
+            pids_limit=128,
+        )
+        self.assertEqual(cmd[cmd.index("--memory") + 1], "1g")
+        self.assertEqual(cmd[cmd.index("--cpus") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--pids-limit") + 1], "128")
+
     def test_default_network_is_bridge_with_add_host(self) -> None:
         """RUNNER_NETWORK unset (local dev without compose): byte-identical
         to the pre-ADR-025 behavior."""

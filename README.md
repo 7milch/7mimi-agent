@@ -62,6 +62,8 @@ The container runner mounts the repository at `/workspace`, writes dry-run outpu
 
 By default the container runner uses `--network none` for the current mock/dry-run flow. Future real MCP/proxy integrations can opt into an explicit Docker network.
 
+The claude-digest/invest-digest `docker run` (Issue #27) applies container resource limits (`--memory`, `--cpus`, `--pids-limit`), tunable via the `RUNNER_MEMORY` / `RUNNER_CPUS` / `RUNNER_PIDS_LIMIT` env vars (defaults: `2g` / `2` / `512`).
+
 ## Go proxy services
 
 `claude-proxy` and `auth-proxy` are implemented in Go (see ADR-012). They form the security-sensitive network boundary: claude-proxy owns `ANTHROPIC_API_KEY`, auth-proxy owns tool authorization and external API credentials. Python keeps orchestration, research logic, and document generation.

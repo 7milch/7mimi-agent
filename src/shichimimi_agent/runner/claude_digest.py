@@ -59,7 +59,8 @@ class ClaudeDigestOptions:
     docker_bin: str = "docker"
     network: str = "bridge"
     memory: str = "2g"
-    pids_limit: int = 256
+    cpus: str = "2"
+    pids_limit: int = 512
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,9 @@ def build_docker_command(
     allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
     include_git_relay: bool = True,
     mcp_config: dict[str, Any] | None = None,
+    memory: str | None = None,
+    cpus: str | None = None,
+    pids_limit: int | None = None,
 ) -> list[str]:
     """Build the `docker run ... claude -p ...` command.
 
@@ -128,7 +132,19 @@ def build_docker_command(
     /workspace/.mcp.json --strict-mcp-config``; ``allowed_tools`` should then
     include the corresponding ``mcp__<server>__<tool>`` names (see
     DIRECT_MCP_ALLOWED_TOOLS).
+
+    ``memory``/``cpus``/``pids_limit``, when omitted, resolve from the
+    ``RUNNER_MEMORY``/``RUNNER_CPUS``/``RUNNER_PIDS_LIMIT`` env vars, falling
+    back to ``"2g"``/``"2"``/``512`` (Issue #27: container resource limits).
+    Explicit call-site args always win over the env vars.
     """
+    if memory is None:
+        memory = os.environ.get("RUNNER_MEMORY", options.memory)
+    if cpus is None:
+        cpus = os.environ.get("RUNNER_CPUS", getattr(options, "cpus", "2"))
+    if pids_limit is None:
+        env_pids_limit = os.environ.get("RUNNER_PIDS_LIMIT")
+        pids_limit = int(env_pids_limit) if env_pids_limit else options.pids_limit
     claude_proxy_url = os.environ.get("CLAUDE_PROXY_URL")
     session_token = os.environ.get("CLAUDE_PROXY_SESSION_TOKEN")
     if not claude_proxy_url or not session_token:
@@ -205,9 +221,11 @@ def build_docker_command(
         f"7mimi-claude-digest-{session_id}",
         *network_args,
         "--memory",
-        options.memory,
+        memory,
+        "--cpus",
+        cpus,
         "--pids-limit",
-        str(options.pids_limit),
+        str(pids_limit),
         "-v",
         f"{workspace.resolve()}:/workspace",
         "-w",
