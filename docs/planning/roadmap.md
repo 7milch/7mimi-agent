@@ -73,7 +73,7 @@
 - [x] X MCP read-only connection test
 - [x] J-Quants MCP connection test
 - [x] manual command: `research stock 7011`
-- [ ] manual command: `collect x ai-agent`
+- [x] manual command: `collect x ai-agent`
 - [x] Markdown output generation (daily digest)
 
 ### Phase 2: Policy and hooks

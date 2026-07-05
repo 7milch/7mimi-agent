@@ -34,8 +34,9 @@ type Engine struct {
 
 // NewDevEngine returns the embedded development policy, mirroring
 // config/policy.yaml's role_tool_policy for the roles relevant to the /mcp
-// boundary (ai_it_topic_runner, investment_signal_runner, stock_researcher).
-// Full config/policy.yaml compatibility for every role comes later.
+// boundary (ai_it_topic_runner, investment_signal_runner, stock_researcher,
+// x_collector). Full config/policy.yaml compatibility for every role comes
+// later.
 func NewDevEngine() *Engine {
 	return &Engine{roles: map[string]RolePolicy{
 		"ai_it_topic_runner": {
@@ -81,6 +82,30 @@ func NewDevEngine() *Engine {
 				"document.write_markdown",
 				"document.write_outside_workspace",
 				"document.delete_recursive",
+			},
+		},
+		// Mirrors config/policy.yaml role_tool_policy.x_collector exactly
+		// (parity-tested by tests/test_policy_parity.py): read-only X search
+		// plus web fetch/extract and queue append, no X writes, no J-Quants,
+		// no trading, no document writes.
+		"x_collector": {
+			Allow: []string{
+				"x.search_posts_recent",
+				"x.get_posts",
+				"x.get_users",
+				"x.get_users_by_username",
+				"web.fetch_url",
+				"web.extract_article",
+				"queue.append_candidate",
+			},
+			Deny: []string{
+				"x.create_post",
+				"x.like_post",
+				"x.repost",
+				"x.follow_user",
+				"x.send_dm",
+				"document.write_markdown",
+				"jquants.*",
 			},
 		},
 		// Mirrors config/policy.yaml role_tool_policy.stock_researcher exactly

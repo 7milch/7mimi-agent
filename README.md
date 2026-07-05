@@ -36,6 +36,8 @@ PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-ru
 
 Dry-run output is written under `.data/dry-run/` and is gitignored.
 
+`PYTHONPATH=src python3 -m shichimimi_agent collect x <query>` collects X posts for `<query>` via `/mcp` (role `x_collector`) and inserts them as `research_queue` rows (URL/handle/engagement only, never full post text -- X is a signal, not evidence).
+
 Run tests:
 
 ```bash

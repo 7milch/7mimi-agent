@@ -97,6 +97,66 @@ class Repository:
             )
         return event_id
 
+    def record_research_queue_item(
+        self,
+        *,
+        source: str,
+        topic: str,
+        reason: str,
+        source_refs: list[dict[str, Any]],
+        score: int,
+        status: str = "new",
+        assigned_role: str | None = None,
+        ticker: str | None = None,
+        company_name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        item_id = new_id("rq")
+        now = iso_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_queue (
+                  id, source, topic, ticker, company_name, reason, source_refs_json,
+                  score, status, assigned_role, created_at, updated_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    source,
+                    topic,
+                    ticker,
+                    company_name,
+                    reason,
+                    json.dumps(source_refs, ensure_ascii=False),
+                    score,
+                    status,
+                    assigned_role,
+                    now,
+                    now,
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                ),
+            )
+        return item_id
+
+    def list_research_queue(self, status: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM research_queue"
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            query += " WHERE status = ?"
+            params = (status,)
+        query += " ORDER BY created_at ASC"
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["source_refs"] = json.loads(item.pop("source_refs_json") or "[]")
+            item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+            items.append(item)
+        return items
+
     def record_document(self, *, repo: str | None, path: str, title: str, doc_type: str, status: str, source_refs: list[dict[str, Any]], commit_sha: str | None = None, metadata: dict[str, Any] | None = None) -> str:
         doc_id = new_id("doc")
         now = iso_now()

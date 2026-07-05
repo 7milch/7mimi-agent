@@ -19,9 +19,12 @@ from pathlib import Path
 from shichimimi_agent.config import load_config
 
 # Roles enforced by the Go /mcp boundary (ADR-028); other role_tool_policy
-# roles (orchestrator, x_collector, document_writer, source_verifier) are
-# not exposed via /mcp session tokens today and are out of scope here.
-_ROLES_TO_CHECK = ["ai_it_topic_runner", "investment_signal_runner", "stock_researcher"]
+# roles (orchestrator, document_writer, source_verifier) are not exposed via
+# /mcp session tokens today and are out of scope here. x_collector (Issue #25)
+# is included for parity completeness even though `collect x` mirrors
+# stock_research's use of the static X_MCP_SESSION_TOKEN rather than a
+# minted per-role token.
+_ROLES_TO_CHECK = ["ai_it_topic_runner", "investment_signal_runner", "stock_researcher", "x_collector"]
 
 # Representative tool names to probe per role: enough to exercise every
 # allow/deny pattern relevant to the /mcp tool surface (x.*, jq.*, trading.*,

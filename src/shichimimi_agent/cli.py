@@ -430,6 +430,42 @@ def cmd_research_stock(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_collect_x(args: argparse.Namespace) -> int:
+    """Issue #25: `collect x <query>` -- deterministic X signal collection into research_queue."""
+    from shichimimi_agent.runner.collect_x import run_collect_x
+
+    try:
+        config = _load_validated_config(args.root)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    migrate(default_db_path(config.root))
+    repository = Repository.for_root(config.root)
+
+    try:
+        result = run_collect_x(
+            config=config,
+            repository=repository,
+            query=args.query,
+            max_results=args.max_results,
+        )
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(json.dumps(
+        {
+            "status": result.status,
+            "query": result.query,
+            "inserted_count": result.inserted_count,
+            "item_ids": result.item_ids,
+        },
+        ensure_ascii=False,
+        indent=2,
+    ))
+    return 0
+
+
 def cmd_x_smoke(args: argparse.Namespace) -> int:
     """Connection-test CLI for x-mcp-readonly: authorize then call x.search_posts_recent."""
     import os
@@ -602,6 +638,13 @@ def build_parser() -> argparse.ArgumentParser:
     stock = research_sub.add_parser("stock")
     stock.add_argument("code")
     stock.set_defaults(func=cmd_research_stock)
+
+    collect = sub.add_parser("collect")
+    collect_sub = collect.add_subparsers(dest="collect_command", required=True)
+    collect_x = collect_sub.add_parser("x")
+    collect_x.add_argument("query")
+    collect_x.add_argument("--max-results", type=int, default=20)
+    collect_x.set_defaults(func=cmd_collect_x)
     return parser
 
 
