@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-proxy と auth-proxy を読む — Go とWebプロトコルの入門を兼ねた技術解説</title>
+<style>
+  :root {
+    --fg: #1a1f27; --bg: #ffffff; --muted: #5b6472; --accent: #0b5cad;
+    --card: #f5f7fa; --border: #d6dce4; --code-bg: #f4f6f8; --code-fg: #24292f;
+    --kw: #b3005a; --str: #0a7d3f; --com: #6a7480; --num: #8a4b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e4e8ee; --bg: #121620; --muted: #9aa4b2; --accent: #6fb2ff;
+            --card: #1a2030; --border: #2c3648; --code-bg: #1b2130; --code-fg: #d6dce6;
+            --kw: #ff86b8; --str: #7fd69a; --com: #7d8896; --num: #e0a06a; }
+  }
+  :root[data-theme="dark"] {
+    --fg: #e4e8ee; --bg: #121620; --muted: #9aa4b2; --accent: #6fb2ff;
+    --card: #1a2030; --border: #2c3648; --code-bg: #1b2130; --code-fg: #d6dce6;
+    --kw: #ff86b8; --str: #7fd69a; --com: #7d8896; --num: #e0a06a;
+  }
+  :root[data-theme="light"] {
+    --fg: #1a1f27; --bg: #ffffff; --muted: #5b6472; --accent: #0b5cad;
+    --card: #f5f7fa; --border: #d6dce4; --code-bg: #f4f6f8; --code-fg: #24292f;
+    --kw: #b3005a; --str: #0a7d3f; --com: #6a7480; --num: #8a4b00;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 1.3rem 5rem; background: var(--bg); color: var(--fg);
+         font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+         line-height: 1.95; font-size: 16.5px; }
+  main { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.62rem; line-height: 1.5; margin: 2.8rem 0 1.4rem; font-weight: 700;
+       border-bottom: 3px double var(--border); padding-bottom: 1rem; }
+  h2 { font-size: 1.3rem; margin-top: 3.4rem; padding: .4rem 0 .35rem .7rem;
+       border-left: 5px solid var(--accent); background: var(--card); }
+  h3 { font-size: 1.08rem; margin-top: 2.4rem; color: var(--accent); font-weight: 700; }
+  p { margin: 1rem 0; text-align: justify; }
+  a { color: var(--accent); }
+  .lead { color: var(--muted); }
+  ul, ol { padding-left: 1.5rem; }
+  li { margin: .4rem 0; }
+  code { font-family: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+         font-size: .85em; background: var(--code-bg); padding: .1em .38em; border-radius: 4px;
+         color: var(--code-fg); }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: 1rem 1.1rem; overflow-x: auto; margin: 1.4rem 0; line-height: 1.7; }
+  pre code { background: none; padding: 0; font-size: 13.5px; }
+  table { border-collapse: collapse; width: 100%; margin: 1.4rem 0; display: block; overflow-x: auto;
+          font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: .92rem; }
+  th, td { border: 1px solid var(--border); padding: .5rem .8rem; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+         padding: 1rem 1.4rem; margin: 2rem 0;
+         font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: .95rem; }
+  .toc ol { padding-left: 1.3rem; } .toc li { margin: .25rem 0; }
+  .toc a { text-decoration: none; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+  strong { font-weight: 700; }
+  /* code token colors */
+  .k { color: var(--kw); } .s { color: var(--str); } .c { color: var(--com); font-style: italic; }
+  .n { color: var(--num); }
+  .theme-toggle { position: fixed; top: .8rem; right: .8rem; background: var(--card);
+    border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: .3rem .6rem;
+    font-size: .8rem; cursor: pointer; font-family: sans-serif; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" onclick="(function(){var r=document.documentElement;var d=(r.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))==='dark';r.setAttribute('data-theme',d?'light':'dark');})()">◐ 表示切替</button>
+<main>
+
+<h1>claude-proxy と auth-proxy を読む<br><span style="font-size:.72em;font-weight:400;color:var(--muted)">— Go とWebプロトコルの入門を兼ねた技術解説 —</span></h1>
+
+<p class="lead">本書は、7mimi-agent の 2 つの境界サービス <strong>claude-proxy</strong> と <strong>auth-proxy</strong> を題材に、これらがどのような仕組みで動いているのかを、Go 言語およびHTTPを中心とするWebプロトコルの前提知識がない読者に向けて解説するものである。実際のソースコードを引用しながら、一行ずつ意味を確認していく形式をとる。口語的な読み物ではなく、順を追って理解を積み上げる教科書として記述する。</p>
+
+<div class="toc">
+<strong>目次</strong>
+<ol>
+<li><a href="#c1">第1章 準備 — 本書で扱う対象と前提</a></li>
+<li><a href="#c2">第2章 claude-proxy — もっとも単純な境界</a></li>
+<li><a href="#c3">第3章 auth-proxy — 複数の境界を束ねる</a></li>
+<li><a href="#c4">第4章 全体を貫く設計原則</a></li>
+<li><a href="#end">むすび</a></li>
+</ol>
+</div>
+
+<hr>
+
+<h2 id="c1">第1章 準備 — 本書で扱う対象と前提</h2>
+
+<h3>1.1 プロキシとは何か</h3>
+<p>プロキシ(proxy)とは「代理」を意味する。ネットワークにおけるプロキシサーバとは、クライアント(要求する側)とサーバ(応答する側)の間に立ち、通信を中継するプログラムである。中継する際に、内容を検査したり、書き換えたり、記録したりできる。</p>
+<p>7mimi-agent では、AIエージェント(agent-runner)が外部サービス(Anthropic API、GitHub、X、Slack)と通信する経路のすべてにプロキシを挟んでいる。目的は一つである。<strong>本物の認証情報(APIキーや秘密鍵)を、AIが動くコンテナに一切置かないこと</strong>。認証情報はプロキシだけが保持し、通信を中継する瞬間にプロキシが代理で差し込む。</p>
+<ul>
+<li><strong>claude-proxy</strong>: Anthropic API(大規模言語モデル)への通信を中継する。<code>ANTHROPIC_API_KEY</code> を保持する。</li>
+<li><strong>auth-proxy</strong>: GitHub・X・Slack・J-Quants への通信を中継する。GitHub App秘密鍵、Xトークン、Slackトークン等を保持する。</li>
+</ul>
+
+<h3>1.2 HTTPの最小限の知識</h3>
+<p>両サービスはHTTP(HyperText Transfer Protocol)で通信する。HTTPは「要求(リクエスト)」と「応答(レスポンス)」の往復で成り立つ。理解に必要な用語を先に定義する。</p>
+<ul>
+<li><strong>メソッド</strong>: 要求の種類。<code>GET</code>(取得)、<code>POST</code>(送信)などがある。</li>
+<li><strong>パス</strong>: 要求先を表す文字列。例:<code>/v1/messages</code>。</li>
+<li><strong>ヘッダ</strong>: 要求・応答に付随するメタ情報。<code>名前: 値</code> の形式で複数並ぶ。</li>
+<li><strong>ボディ</strong>: 要求・応答の本体データ。</li>
+<li><strong>ステータスコード</strong>: 応答の結果を表す3桁の数字。<code>200</code>(成功)、<code>401</code>(認証失敗)、<code>403</code>(禁止)、<code>502</code>(上流ゲートウェイ異常)など。</li>
+</ul>
+<p>特に重要なヘッダが <code>Authorization</code> である。これは「私は誰々である」ことを証明する情報を運ぶ。本書に頻出する形式は次の2つである。</p>
+<pre><code>Authorization: Bearer &lt;トークン文字列&gt;
+Authorization: Basic &lt;base64でエンコードした「利用者名:パスワード」&gt;</code></pre>
+<p><code>Bearer</code>(ベアラー)方式は「このトークンを持っている者(bearer)を正当とみなす」という意味である。トークンそのものが鍵になる。</p>
+
+<h3>1.3 Goの最小限の知識</h3>
+<p>Go(ゴー)はGoogleが開発したプログラミング言語である。本書のコードを読むために必要な文法を先に押さえる。</p>
+<ul>
+<li><strong>パッケージ</strong>: コードのまとまり。ファイル冒頭に <code>package proxy</code> のように書く。</li>
+<li><strong>import</strong>: 他のパッケージを取り込む宣言。</li>
+<li><strong>関数</strong>: <code>func 関数名(引数) 戻り値の型 { ... }</code> の形式。</li>
+<li><strong>構造体(struct)</strong>: 複数の値をまとめた型。<code>type Config struct { ... }</code> のように定義する。</li>
+<li><strong>メソッド</strong>: 特定の型に結びついた関数。<code>func (h *Handler) Routes() ...</code> の <code>(h *Handler)</code> の部分をレシーバと呼び、「この関数は Handler 型に属する」ことを表す。</li>
+<li><strong>エラー処理</strong>: Goは例外機構を多用せず、関数が値とエラーの2つを返し、呼び出し側が <code>if err != nil</code> でエラーを確認する慣習をとる。</li>
+<li><strong>ポインタ</strong>: <code>*Config</code> は「Config構造体への参照」を表す。値のコピーではなく実体を指す。</li>
+</ul>
+<p>これらは章が進むごとに実例で確認する。</p>
+
+<hr>
+
+<h2 id="c2">第2章 claude-proxy — もっとも単純な境界</h2>
+<p>claude-proxy は4ファイル・約200行の小さなプログラムである。単純であるがゆえに、プロキシの基本構造を学ぶ教材として適している。まずこのサービスを完全に読み解く。</p>
+
+<h3>2.1 設定を環境変数から読む(config.go)</h3>
+<p>プログラムは起動時に「どのポートで待ち受けるか」「どの認証情報を使うか」といった設定を必要とする。7mimi-agent では設定を<strong>環境変数</strong>から読む。環境変数とは、プログラムの外側(OSやコンテナ)から与えられる名前付きの値である。ソースコードに秘密情報を書き込まずに済む利点がある。</p>
+<pre><code><span class="k">package</span> config
+
+<span class="k">import</span> (
+	<span class="s">"fmt"</span>
+	<span class="s">"os"</span>
+)
+
+<span class="c">// Config holds claude-proxy runtime configuration.</span>
+<span class="c">// ANTHROPIC_API_KEY is the provider credential boundary: it lives here and</span>
+<span class="c">// must never be forwarded to agent-runner or written to logs.</span>
+<span class="k">type</span> Config <span class="k">struct</span> {
+	Addr             <span class="k">string</span>
+	AnthropicAPIKey  <span class="k">string</span>
+	AnthropicBaseURL <span class="k">string</span>
+	DevSessionToken  <span class="k">string</span>
+}</code></pre>
+<p><code>Config</code> は4つの文字列を持つ構造体である。それぞれ、待ち受けアドレス、Anthropic APIキー、Anthropic APIの接続先URL、開発用セッショントークンを表す。コメントが明記しているとおり、<code>AnthropicAPIKey</code> が「認証情報の境界」であり、これがagent-runnerに転送されたりログに書かれたりしてはならない。</p>
+<p>次に、環境変数から実際に値を読み取る関数を見る。</p>
+<pre><code><span class="k">func</span> FromEnv() (*Config, <span class="k">error</span>) {
+	cfg := &Config{
+		Addr:             envOr(<span class="s">"CLAUDE_PROXY_ADDR"</span>, <span class="s">":18080"</span>),
+		AnthropicAPIKey:  os.Getenv(<span class="s">"ANTHROPIC_API_KEY"</span>),
+		AnthropicBaseURL: envOr(<span class="s">"ANTHROPIC_BASE_URL"</span>, <span class="s">"https://api.anthropic.com"</span>),
+		DevSessionToken:  envOr(<span class="s">"CLAUDE_PROXY_DEV_TOKEN"</span>, <span class="s">"cp_sess_dev"</span>),
+	}
+	<span class="k">if</span> cfg.AnthropicAPIKey == <span class="s">""</span> {
+		<span class="k">return</span> nil, fmt.Errorf(<span class="s">"ANTHROPIC_API_KEY is required"</span>)
+	}
+	<span class="k">return</span> cfg, nil
+}</code></pre>
+<p><code>FromEnv</code> は <code>(*Config, error)</code> という2つの値を返す。成功すれば設定へのポインタとエラーなし(<code>nil</code>)を、失敗すればエラーを返す。これがGoの典型的なエラー処理の形である。</p>
+<p>注目すべきは末尾の検査である。<code>AnthropicAPIKey</code> が空文字列であれば、<code>fmt.Errorf</code> でエラーを生成して返す。これは<strong>fail-closed(フェイルクローズド)</strong>、すなわち「必須情報が欠けていれば安全側に倒して起動を拒否する」設計である。APIキーなしで起動してしまえば、認証情報の境界という前提が崩れるため、最初から動かさない。</p>
+<p>補助関数 <code>envOr</code> は「環境変数があればその値、なければ既定値」を返す。</p>
+<pre><code><span class="k">func</span> envOr(key, fallback <span class="k">string</span>) <span class="k">string</span> {
+	<span class="k">if</span> v := os.Getenv(key); v != <span class="s">""</span> {
+		<span class="k">return</span> v
+	}
+	<span class="k">return</span> fallback
+}</code></pre>
+<p><code>os.Getenv</code> は環境変数を読む標準ライブラリの関数である。<code>:18080</code> のように既定値を与えることで、環境変数が未設定でも動作する。</p>
+
+<h3>2.2 監査ログ — 記録するが秘密は残さない(audit.go)</h3>
+<p>境界サービスの重要な責務の一つが監査である。「いつ・誰が・何をした」を記録する。ただし、<strong>記録にも秘密情報を残さない</strong>という原則を貫く。claude-proxy の監査ログの型を見る。</p>
+<pre><code><span class="c">// Event is metadata-only audit information. Request/response bodies and</span>
+<span class="c">// provider credentials must never appear here.</span>
+<span class="k">type</span> Event <span class="k">struct</span> {
+	Timestamp      <span class="k">string</span> <span class="s">`json:"timestamp"`</span>
+	SessionID      <span class="k">string</span> <span class="s">`json:"session_id"`</span>
+	Role           <span class="k">string</span> <span class="s">`json:"role"`</span>
+	Method         <span class="k">string</span> <span class="s">`json:"method"`</span>
+	Path           <span class="k">string</span> <span class="s">`json:"path"`</span>
+	UpstreamStatus <span class="k">int</span>    <span class="s">`json:"upstream_status"`</span>
+	DurationMS     <span class="k">int64</span>  <span class="s">`json:"duration_ms"`</span>
+	Decision       <span class="k">string</span> <span class="s">`json:"decision,omitempty"`</span>
+	Reason         <span class="k">string</span> <span class="s">`json:"reason,omitempty"`</span>
+}</code></pre>
+<p>記録するのは、時刻・セッションID・ロール・HTTPメソッド・パス・上流の応答ステータス・所要時間・許可/拒否の判定・理由だけである。<strong>リクエストボディ(実際の会話内容)もAPIキーも、この構造体には存在しない</strong>。型のレベルで「秘密は記録できない」ことを保証している。</p>
+<p>各フィールド右側の <code>`json:"timestamp"`</code> はタグと呼ばれ、この構造体をJSON形式の文字列に変換する際のキー名を指定する。<code>omitempty</code> は「値が空なら出力しない」という指定である。</p>
+<p>ログを書き出すメソッドを見る。</p>
+<pre><code><span class="k">func</span> (l *Logger) Log(event Event) {
+	<span class="k">if</span> event.Timestamp == <span class="s">""</span> {
+		event.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	line, err := json.Marshal(event)
+	<span class="k">if</span> err != nil {
+		<span class="k">return</span> <span class="c">// fail-open: audit must not break proxying</span>
+	}
+	l.out.Write(append(line, <span class="s">'\n'</span>))
+}</code></pre>
+<p><code>json.Marshal</code> が <code>Event</code> 構造体をJSON文字列(正確にはバイト列)に変換する。ここで注目すべきコメントが <code>fail-open</code> である。監査ログの書き出しに失敗しても、<code>return</code> するだけで何もしない。<strong>監査の失敗が本来の中継処理を止めてはならない</strong>という方針である。</p>
+<p>第2.1節の設定読み込みは fail-closed(欠けたら止める)、この監査は fail-open(失敗しても続ける)であった。この使い分けは意図的である。セキュリティの根幹(認証情報)は欠けたら止め、補助機能(ログ)は失敗しても本業を止めない。</p>
+
+<h3>2.3 プログラムの起動(main.go)</h3>
+<p><code>main</code> 関数がプログラムの入口である。まず本体部分を見る。</p>
+<pre><code><span class="k">func</span> main() {
+	<span class="k">if</span> len(os.Args) &gt; 1 && os.Args[1] == <span class="s">"-healthcheck"</span> {
+		runHealthcheck()
+		<span class="k">return</span>
+	}
+	cfg, err := config.FromEnv()
+	<span class="k">if</span> err != nil {
+		log.Fatalf(<span class="s">"claude-proxy: %v"</span>, err)
+	}
+	handler := proxy.NewHandler(cfg, audit.NewLogger(os.Stdout))
+	log.Printf(<span class="s">"claude-proxy listening on %s (upstream %s)"</span>, cfg.Addr, cfg.AnthropicBaseURL)
+	<span class="k">if</span> err := http.ListenAndServe(cfg.Addr, handler.Routes()); err != nil {
+		log.Fatalf(<span class="s">"claude-proxy: %v"</span>, err)
+	}
+}</code></pre>
+<p>処理の流れは次のとおりである。</p>
+<ol>
+<li>コマンド引数の先頭が <code>-healthcheck</code> なら、ヘルスチェック処理を実行して終了する(後述)。</li>
+<li><code>config.FromEnv()</code> で設定を読む。失敗すれば <code>log.Fatalf</code> でメッセージを出して即座に終了する。</li>
+<li><code>proxy.NewHandler</code> で「中継を担うハンドラ」を作る。監査ロガーには標準出力(<code>os.Stdout</code>)を渡す。</li>
+<li><code>http.ListenAndServe</code> でHTTPサーバを起動し、指定アドレスで要求を待ち受ける。第2引数の <code>handler.Routes()</code> が、パスと処理の対応表(後述)である。</li>
+</ol>
+<p><code>http.ListenAndServe</code> はGo標準ライブラリの関数で、これだけでHTTPサーバが立ち上がる。Goがネットワークサービス開発に向いていると言われる一因が、この標準ライブラリの充実にある。</p>
+
+<h3>2.4 ヘルスチェック — 外部ツールに頼らない自己診断</h3>
+<p><code>runHealthcheck</code> は、コンテナ実行環境がサービスの生存を確認するための仕組みである。</p>
+<pre><code><span class="k">func</span> runHealthcheck() {
+	addr := os.Getenv(<span class="s">"CLAUDE_PROXY_ADDR"</span>)
+	<span class="k">if</span> addr == <span class="s">""</span> {
+		addr = <span class="s">":18080"</span>
+	}
+	<span class="k">if</span> idx := strings.LastIndex(addr, <span class="s">":"</span>); idx &gt;= 0 {
+		addr = addr[idx:]
+	}
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(<span class="s">"http://127.0.0.1"</span> + addr + <span class="s">"/healthz"</span>)
+	<span class="k">if</span> err != nil {
+		os.Exit(1)
+	}
+	<span class="k">defer</span> resp.Body.Close()
+	<span class="k">if</span> resp.StatusCode != http.StatusOK {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}</code></pre>
+<p>この関数は、自分自身の <code>/healthz</code> エンドポイントに <code>GET</code> 要求を送り、応答が <code>200 OK</code> なら終了コード <code>0</code>(正常)、そうでなければ <code>1</code>(異常)でプロセスを終了する。</p>
+<p>なぜこんな回りくどいことをするのか。コメントに理由がある。本サービスは配布時にdistroless(最小構成)のコンテナイメージを使うため、<code>curl</code> や <code>wget</code> といったツールも、シェルさえも入っていない。外部ツールでヘルスチェックできないので、<strong>バイナリ自身が診断コマンドを兼ねる</strong>。<code>claude-proxy -healthcheck</code> と実行すると、通常のサーバ起動ではなくこの自己診断だけを行う。第2.3節冒頭の分岐がこれを切り替えている。</p>
+<p><code>defer resp.Body.Close()</code> の <code>defer</code> は「この関数を抜ける直前に必ず実行する」という予約である。応答ボディは使い終わったら閉じる必要があり、<code>defer</code> を使うと閉じ忘れを防げる。Goで頻出する定型である。</p>
+
+<h3>2.5 中継の心臓部(proxy.go)</h3>
+<p>いよいよ本体である。まず、パスと処理の対応表を作る <code>Routes</code> メソッドを見る。</p>
+<pre><code><span class="k">func</span> (h *Handler) Routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc(<span class="s">"GET /healthz"</span>, h.handleHealthz)
+	<span class="c">// Claude Code also calls /v1/messages/count_tokens (and may add more</span>
+	<span class="c">// /v1/messages/* endpoints); all share the same validation/injection.</span>
+	mux.HandleFunc(<span class="s">"POST /v1/messages"</span>, h.handleMessages)
+	mux.HandleFunc(<span class="s">"POST /v1/messages/"</span>, h.handleMessages)
+	<span class="k">return</span> mux
+}</code></pre>
+<p><code>http.ServeMux</code> は「マルチプレクサ」の略で、要求のメソッドとパスを見て、適切な処理関数に振り分ける役割を持つ。ここでは3つの経路を登録している。</p>
+<ul>
+<li><code>GET /healthz</code> → ヘルスチェック応答</li>
+<li><code>POST /v1/messages</code> → メッセージ中継</li>
+<li><code>POST /v1/messages/</code> → 同上(末尾スラッシュ付きの派生パスも同じ処理に流す)</li>
+</ul>
+<p><code>/v1/messages/count_tokens</code> のような派生エンドポイントも <code>/v1/messages/</code> の登録で拾える。すべて同じ検証と認証情報の差し込みを通すため、一つの処理関数 <code>handleMessages</code> に集約している。</p>
+<p><code>handleMessages</code> が中継の心臓部である。長いので段階的に読む。まず冒頭。</p>
+<pre><code><span class="k">func</span> (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	sessionID := r.Header.Get(<span class="s">"X-7mimi-Session-Id"</span>)
+	role := r.Header.Get(<span class="s">"X-7mimi-Role"</span>)
+
+	deny := <span class="k">func</span>(status <span class="k">int</span>, reason <span class="k">string</span>) {
+		h.logger.Log(audit.Event{
+			SessionID: sessionID, Role: role,
+			Method: r.Method, Path: r.URL.Path,
+			UpstreamStatus: 0, DurationMS: time.Since(start).Milliseconds(),
+			Decision: <span class="s">"block"</span>, Reason: reason,
+		})
+		http.Error(w, reason, status)
+	}</code></pre>
+<p>HTTPの処理関数は、慣習的に <code>w http.ResponseWriter</code>(応答を書き込む先)と <code>r *http.Request</code>(受け取った要求)の2つを引数にとる。</p>
+<ul>
+<li><code>start := time.Now()</code> で処理開始時刻を記録する。後で所要時間を計算するためである。</li>
+<li><code>r.Header.Get(...)</code> で要求ヘッダから値を取り出す。<code>X-7mimi-Session-Id</code> と <code>X-7mimi-Role</code> は、この7mimi-agentが独自に付けているヘッダで、どのセッションのどのロールからの要求かを示す。</li>
+<li><code>deny</code> は関数内で定義された無名関数である。「要求を拒否する」処理を一箇所にまとめている。拒否時には監査ログに <code>Decision: "block"</code> として記録し、<code>http.Error</code> でエラー応答を返す。</li>
+</ul>
+<p>続いて、認証と検証の部分。</p>
+<pre><code>	token, ok := bearerToken(r.Header.Get(<span class="s">"Authorization"</span>))
+	<span class="k">if</span> !ok {
+		deny(http.StatusUnauthorized, <span class="s">"missing or malformed Authorization bearer token"</span>)
+		<span class="k">return</span>
+	}
+	<span class="k">if</span> token != h.cfg.DevSessionToken {
+		deny(http.StatusUnauthorized, <span class="s">"invalid session token"</span>)
+		<span class="k">return</span>
+	}
+	<span class="k">if</span> sessionID == <span class="s">""</span> {
+		deny(http.StatusBadRequest, <span class="s">"missing X-7mimi-Session-Id"</span>)
+		<span class="k">return</span>
+	}
+	<span class="k">if</span> role == <span class="s">""</span> {
+		deny(http.StatusBadRequest, <span class="s">"missing X-7mimi-Role"</span>)
+		<span class="k">return</span>
+	}</code></pre>
+<p>4段階の検査を順に行う。</p>
+<ol>
+<li><code>Authorization</code> ヘッダから Bearer トークンを取り出す。取り出せなければ <code>401 Unauthorized</code> で拒否。</li>
+<li>そのトークンが、設定された<strong>セッショントークン</strong>と一致するか確認する。一致しなければ拒否。ここで確認しているのは Anthropic のAPIキーではない。agent-runner が持つのは「その場限りの合言葉」であるセッショントークンだけで、本物のAPIキーは持っていない。プロキシは合言葉を確認するだけである。</li>
+<li>セッションIDが空でないか。</li>
+<li>ロールが空でないか。</li>
+</ol>
+<p>いずれの検査でも、失敗すれば <code>deny</code> して <code>return</code> で処理を打ち切る。これも fail-closed の実践である。要求が完全に条件を満たすまで、先へ進ませない。</p>
+<p>検査を通過したら、いよいよ上流(Anthropic API)への要求を組み立てる。</p>
+<pre><code>	upstreamURL := strings.TrimRight(h.cfg.AnthropicBaseURL, <span class="s">"/"</span>) + r.URL.Path
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, r.Body)
+	<span class="k">if</span> err != nil {
+		deny(http.StatusInternalServerError, <span class="s">"failed to build upstream request"</span>)
+		<span class="k">return</span>
+	}
+	copyProxyHeaders(upstreamReq.Header, r.Header)
+	<span class="c">// Credential injection happens only here; the caller-provided session</span>
+	<span class="c">// token and 7mimi headers are stripped from the upstream request.</span>
+	upstreamReq.Header.Set(<span class="s">"x-api-key"</span>, h.cfg.AnthropicAPIKey)
+	<span class="k">if</span> upstreamReq.Header.Get(<span class="s">"anthropic-version"</span>) == <span class="s">""</span> {
+		upstreamReq.Header.Set(<span class="s">"anthropic-version"</span>, defaultAnthropicVersion)
+	}</code></pre>
+<p>ここが<strong>認証情報の差し込み(credential injection)</strong>が起きる、本サービスで最も重要な数行である。</p>
+<ul>
+<li><code>upstreamURL</code> は、Anthropicの接続先URLに、受け取った要求のパスを連結して作る。</li>
+<li><code>http.NewRequestWithContext</code> で、上流に送る新しい要求を作る。ボディ(<code>r.Body</code>)は受け取ったものをそのまま流す。</li>
+<li><code>copyProxyHeaders</code> で、安全なヘッダだけを転送する(後述)。</li>
+<li><code>upstreamReq.Header.Set("x-api-key", h.cfg.AnthropicAPIKey)</code> — <strong>ここで初めて本物のAPIキーが登場する</strong>。上流への要求にだけ <code>x-api-key</code> ヘッダとして差し込む。agent-runner から来た要求には、このヘッダは存在しなかった。プロキシが代理で付けたのである。</li>
+<li><code>anthropic-version</code> ヘッダが未設定なら既定値を補う。</li>
+</ul>
+<p>つまり、agent-runner → claude-proxy の区間では要求はセッショントークンしか持たず、claude-proxy → Anthropic の区間で初めてAPIキーが付く。<strong>APIキーが存在するのはプロキシの内側だけ</strong>である。</p>
+<p>上流へ送信し、応答を受け取る。</p>
+<pre><code>	resp, err := h.client.Do(upstreamReq)
+	<span class="k">if</span> err != nil {
+		deny(http.StatusBadGateway, <span class="s">"upstream request failed"</span>)
+		<span class="k">return</span>
+	}
+	<span class="k">defer</span> resp.Body.Close()
+
+	<span class="k">for</span> key, values := range resp.Header {
+		<span class="k">for</span> _, v := range values {
+			w.Header().Add(key, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	streamCopy(w, resp.Body)</code></pre>
+<ul>
+<li><code>h.client.Do(upstreamReq)</code> で実際に要求を送る。失敗すれば <code>502 Bad Gateway</code>(上流が応答しない)で拒否する。</li>
+<li>上流の応答ヘッダを、そのままクライアントへの応答にコピーする。</li>
+<li><code>w.WriteHeader(resp.StatusCode)</code> で上流のステータスコードをそのまま返す。</li>
+<li><code>streamCopy</code> で応答ボディをクライアントへ流す(後述)。</li>
+</ul>
+<p>最後に成功を監査ログに記録する。記録するのは <code>Decision: "allow"</code>、上流ステータス、所要時間だけであり、会話内容やAPIキーは残らない。</p>
+
+<h3>2.6 ヘッダの衛生管理(copyProxyHeaders)</h3>
+<p>第2.5節で触れた <code>copyProxyHeaders</code> を詳しく見る。これは「どのヘッダを上流へ通すか」を厳格に制御する関数である。</p>
+<pre><code><span class="c">// copyProxyHeaders forwards content/accept/anthropic-* headers only.</span>
+<span class="c">// Authorization (session token) and X-7mimi-* attribution headers must not</span>
+<span class="c">// leak to the provider.</span>
+<span class="k">func</span> copyProxyHeaders(dst, src http.Header) {
+	<span class="k">for</span> key, values := range src {
+		lower := strings.ToLower(key)
+		<span class="k">switch</span> {
+		<span class="k">case</span> lower == <span class="s">"content-type"</span>, lower == <span class="s">"accept"</span>, lower == <span class="s">"accept-encoding"</span>:
+		<span class="k">case</span> strings.HasPrefix(lower, <span class="s">"anthropic-"</span>):
+		<span class="k">default</span>:
+			<span class="k">continue</span>
+		}
+		<span class="k">for</span> _, v := range values {
+			dst.Add(key, v)
+		}
+	}
+}</code></pre>
+<p>受け取ったヘッダ群 <code>src</code> を一つずつ調べ、<code>content-type</code>・<code>accept</code>・<code>accept-encoding</code>、または <code>anthropic-</code> で始まるヘッダだけを転送先 <code>dst</code> に追加する。それ以外はすべて <code>continue</code> で読み飛ばす。これは<strong>許可リスト方式(allowlist)</strong>である。「通してよいものを列挙し、それ以外は通さない」。</p>
+<p>この方式が守っている重要な性質が、コメントに書かれている。<code>Authorization</code>(agent-runner が付けたセッショントークン)と <code>X-7mimi-*</code>(内部の属性情報)を<strong>上流に漏らさない</strong>。どちらも許可リストに載っていないので、確実に除去される。</p>
+<p>「拒否リスト」ではなく「許可リスト」を選ぶ理由は、安全側に倒れるからである。新しいヘッダが将来増えても、許可リストに明示的に加えない限り上流へは行かない。列挙し忘れによる漏洩が起きない。</p>
+
+<h3>2.7 ストリーミングの中継(streamCopy)</h3>
+<p>大規模言語モデルの応答は、生成された順に少しずつ届く「ストリーミング」形式をとることが多い。この逐次性を保ったまま中継するのが <code>streamCopy</code> である。</p>
+<pre><code><span class="c">// streamCopy copies the upstream body flushing after each chunk so SSE</span>
+<span class="c">// streaming responses reach the caller incrementally.</span>
+<span class="k">func</span> streamCopy(w http.ResponseWriter, body io.Reader) {
+	flusher, _ := w.(http.Flusher)
+	buf := make([]<span class="k">byte</span>, 32*1024)
+	<span class="k">for</span> {
+		n, err := body.Read(buf)
+		<span class="k">if</span> n &gt; 0 {
+			<span class="k">if</span> _, werr := w.Write(buf[:n]); werr != nil {
+				<span class="k">return</span>
+			}
+			<span class="k">if</span> flusher != nil {
+				flusher.Flush()
+			}
+		}
+		<span class="k">if</span> err != nil {
+			<span class="k">return</span>
+		}
+	}
+}</code></pre>
+<ul>
+<li><code>buf := make([]byte, 32*1024)</code> で32キロバイトの一時領域(バッファ)を用意する。</li>
+<li>無限ループ <code>for {}</code> の中で、上流の応答ボディから <code>body.Read(buf)</code> で少しずつ読み、読んだ分を <code>w.Write(buf[:n])</code> でクライアントへ書く。</li>
+<li><code>flusher.Flush()</code> が肝である。通常、書き込んだデータは効率のためいったん溜められてから送られる。<code>Flush</code> は「溜めずに今すぐ送れ」という指示である。これにより、モデルが生成した断片が生成されるそばからクライアントに届く。</li>
+<li>上流の読み取りが終端やエラーに達したら(<code>err != nil</code>)、ループを抜ける。</li>
+</ul>
+<p>もし <code>Flush</code> をしなければ、全応答が揃うまでクライアントは何も受け取れず、逐次表示ができない。この一行が、ストリーミング体験を成立させている。</p>
+<p>以上でclaude-proxyの全体を読み終えた。「設定を読む→検証する→認証情報を差し込む→中継する→記録する」という流れは、次章のauth-proxyでも共通する骨格である。</p>
+
+<hr>
+
+<h2 id="c3">第3章 auth-proxy — 複数の境界を束ねる</h2>
+<p>auth-proxy は claude-proxy よりはるかに大きい。一つのサービスの中に、性質の異なる4つの境界を同居させている。</p>
+<table>
+<tr><th>境界</th><th>パス</th><th>役割</th><th>保持する認証情報</th></tr>
+<tr><td>ツール認可</td><td><code>/v1/tool/authorize</code></td><td>ロールごとに許可/拒否を判定</td><td>なし(判定のみ)</td></tr>
+<tr><td>git中継</td><td><code>/git/{owner}/{repo}/...</code></td><td>gitのHTTP通信を透過中継</td><td>GitHub App秘密鍵</td></tr>
+<tr><td>MCPサーバ</td><td><code>/mcp</code></td><td>X・J-QuantsのデータをAIに提供</td><td>Xトークン、J-Quantsトークン</td></tr>
+<tr><td>Slack通知</td><td><code>/v1/slack/notify</code></td><td>Slackへの投稿</td><td>Slack botトークン</td></tr>
+</table>
+<p>加えて、これらを支える<strong>セッション管理</strong>(<code>/session/issue</code>)がある。本章では、起動時の組み立て、セッション管理、ロール認可、そしてgit中継における発展的なプロキシ技法を順に扱う。</p>
+
+<h3>3.1 起動時に境界を組み立てる(main.go)</h3>
+<p>auth-proxy の <code>main</code> 関数は、各境界を条件付きで組み立てる。</p>
+<pre><code><span class="k">func</span> main() {
+	<span class="c">// ... -healthcheck 分岐、addr 決定は claude-proxy と同様 ...</span>
+	logger := audit.NewLogger(os.Stdout)
+	handler := tools.NewHandler(policy.NewDevEngine(), logger)
+
+	<span class="c">// ADR-028: a single shared session.Store backs both /session/issue (mint)</span>
+	<span class="c">// and the /mcp + /git consumers (resolve/validate), so one minted token</span>
+	<span class="c">// works across both surfaces.</span>
+	sessionStore := session.NewStore(sessionStoreOptionsFromEnv()...)
+
+	mux := http.NewServeMux()
+	mux.Handle(<span class="s">"/"</span>, handler.Routes())
+	mountGitRelay(mux, logger, sessionStore)
+	mountXMCP(mux, logger, sessionStore)
+	mountSlackNotify(mux, logger)
+	mountSessionIssue(mux, sessionStore)
+
+	log.Printf(<span class="s">"auth-proxy listening on %s"</span>, addr)
+	<span class="k">if</span> err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatalf(<span class="s">"auth-proxy: %v"</span>, err)
+	}
+}</code></pre>
+<p>claude-proxy との構造上の違いは、一つの <code>mux</code>(振り分け表)に<strong>複数のハンドラを後付けで登録していく</strong>点である。<code>mount</code> で始まる関数群がそれぞれ一つの境界を担当する。</p>
+<p>重要なのは、これらの <code>mount</code> 関数が<strong>必要な認証情報が揃っているときだけ経路を有効化する</strong>ことである。git中継を担う <code>mountGitRelay</code> を見る。</p>
+<pre><code><span class="k">func</span> mountGitRelay(mux *http.ServeMux, logger *audit.Logger, store *session.Store) {
+	sessionToken := os.Getenv(<span class="s">"AUTH_PROXY_SESSION_TOKEN"</span>)
+	<span class="k">if</span> sessionToken == <span class="s">""</span> {
+		log.Printf(<span class="s">"git relay disabled: no session token configured"</span>)
+		<span class="k">return</span>
+	}
+
+	tokens, err := githubapp.NewTokenSourceFromEnv()
+	<span class="k">if</span> err != nil {
+		log.Printf(<span class="s">"git relay disabled: github app credentials unavailable"</span>)
+		<span class="k">return</span>
+	}
+	<span class="c">// ... 中略 ...</span>
+	mux.Handle(<span class="s">"/git/"</span>, relay.Routes())
+}</code></pre>
+<p>セッショントークンが未設定なら、<code>git relay disabled</code> とだけ記録して <code>return</code> する。<strong>経路そのものを登録しない</strong>。登録しなければ <code>/git/</code> へのアクセスは「存在しないパス」として <code>404</code> になる。GitHub App の認証情報がなければ、同様に登録しない。</p>
+<p>これは fail-closed の一形態である。設定が不完全な機能を「一見動くが実は無防備」な状態で公開するのではなく、そもそも生やさない。記録されるメッセージにも認証情報は一切含まれない。</p>
+
+<h3>3.2 セッション管理 — 短命でロールに縛られたトークン(session.go)</h3>
+<p>auth-proxy の認可設計の中核が、<code>session</code> パッケージである。目的は、AIエージェントに渡すトークンを「短命で、特定のロールに縛られ、使用回数に上限がある」ものにすることである。</p>
+<p>まず、トークン一件分の情報を表す構造体と、それを束ねる保管庫を見る。</p>
+<pre><code><span class="k">const</span> defaultTTL = 35 * time.Minute
+<span class="k">const</span> sweepInterval = 5 * time.Minute
+
+<span class="k">type</span> entry <span class="k">struct</span> {
+	role      <span class="k">string</span>
+	expiresAt time.Time
+	calls     <span class="k">int</span>
+}
+
+<span class="c">// Store holds minted session tokens in memory, guarded by a mutex.</span>
+<span class="k">type</span> Store <span class="k">struct</span> {
+	mu        sync.RWMutex
+	entries   <span class="k">map</span>[<span class="k">string</span>]*entry
+	ttl       time.Duration
+	callCap   <span class="k">int</span>
+	stopSweep <span class="k">chan struct</span>{}
+}</code></pre>
+<ul>
+<li><code>entry</code> は1トークンの状態である。どのロールに縛られているか、いつ失効するか、これまで何回使われたか。</li>
+<li><code>Store</code> はトークン文字列から <code>entry</code> を引くための地図(<code>map[string]*entry</code>)を持つ。TTL(有効期間、既定35分)、呼び出し上限(<code>callCap</code>)も持つ。</li>
+<li><code>mu sync.RWMutex</code> は<strong>ミューテックス(排他制御)</strong>である。複数の要求が同時にこの地図を読み書きすると、データが壊れる危険がある。ミューテックスは「今は私が使っているので待て」という札で、同時アクセスを整理する。</li>
+</ul>
+<p>トークンを発行する <code>Issue</code> メソッドを見る。</p>
+<pre><code><span class="k">func</span> (s *Store) Issue(role <span class="k">string</span>) (<span class="k">string</span>, time.Duration) {
+	token := generateToken()
+	s.mu.Lock()
+	s.entries[token] = &entry{role: role, expiresAt: time.Now().Add(s.ttl)}
+	s.mu.Unlock()
+	<span class="k">return</span> token, s.ttl
+}
+
+<span class="k">func</span> generateToken() <span class="k">string</span> {
+	buf := make([]<span class="k">byte</span>, 32)
+	<span class="k">if</span> _, err := rand.Read(buf); err != nil {
+		<span class="c">// crypto/rand failures are effectively unrecoverable; panic rather</span>
+		<span class="c">// than mint a predictable token.</span>
+		panic(<span class="s">"session: crypto/rand read failed: "</span> + err.Error())
+	}
+	<span class="k">return</span> hex.EncodeToString(buf)
+}</code></pre>
+<ul>
+<li><code>generateToken</code> は <code>crypto/rand</code>(暗号論的に安全な乱数生成器)から32バイトの乱数を読み、16進文字列に変換する。32バイト=256ビットの乱数であり、推測は事実上不可能である。乱数生成に失敗した場合は <code>panic</code> でプログラムを止める。予測可能なトークンを発行するくらいなら止まる方が安全、という判断である。</li>
+<li><code>Issue</code> は、生成したトークンをロールと失効時刻に結びつけて地図に登録する。<code>s.mu.Lock()</code> と <code>s.mu.Unlock()</code> で挟むことで、登録中に他の要求が割り込まないようにしている。</li>
+</ul>
+<p>呼び出し回数の上限を課す <code>Charge</code> メソッドが、コスト制御の要である。</p>
+<pre><code><span class="k">func</span> (s *Store) Charge(token <span class="k">string</span>) <span class="k">bool</span> {
+	s.mu.Lock()
+	<span class="k">defer</span> s.mu.Unlock()
+	e, ok := s.entries[token]
+	<span class="k">if</span> !ok {
+		<span class="k">return</span> false
+	}
+	<span class="k">if</span> time.Now().After(e.expiresAt) {
+		delete(s.entries, token)
+		<span class="k">return</span> false
+	}
+	e.calls++
+	<span class="k">return</span> e.calls &lt;= s.callCap
+}</code></pre>
+<p><code>Charge</code> はトークンの使用回数を1増やし、上限(<code>callCap</code>、既定60回)以内なら <code>true</code>、超えたら <code>false</code> を返す。/mcp境界はツールを呼ぶたびにこの <code>Charge</code> を通す。AIが暴走して無限に検索を繰り返そうとしても、この決定的な上限が確実に止める。プロンプトによる「なるべく控えめに」という指示は補助であって、最終的な歯止めはこのコードにある。</p>
+<p>トークンを発行する入口が <code>/session/issue</code> である。</p>
+<pre><code><span class="k">func</span> handleSessionIssue(staticToken <span class="k">string</span>, store *session.Store) http.HandlerFunc {
+	<span class="k">return func</span>(w http.ResponseWriter, r *http.Request) {
+		<span class="k">const</span> prefix = <span class="s">"Bearer "</span>
+		auth := r.Header.Get(<span class="s">"Authorization"</span>)
+		<span class="k">if</span> !strings.HasPrefix(auth, prefix) || subtle.ConstantTimeCompare([]<span class="k">byte</span>(auth[len(prefix):]), []<span class="k">byte</span>(staticToken)) != 1 {
+			http.Error(w, <span class="s">"unauthorized"</span>, http.StatusUnauthorized)
+			<span class="k">return</span>
+		}
+		<span class="c">// ... ロールを読み取り、store.Issue でトークンを発行して返す ...</span></code></pre>
+<p>トークンを発行できるのは、<strong>静的な管理トークン(<code>staticToken</code>)を持つ者だけ</strong>である。これはオーケストレーター(全体を統括するPython側)だけが保持する。AIエージェント自身はトークンを発行できない。オーケストレーターがAIを起動する直前に、そのAIのロールに縛られた短命トークンを発行し、AIに渡す。</p>
+<p>ここで <code>subtle.ConstantTimeCompare</code> に注目する。通常の文字列比較(<code>==</code>)は、先頭から比べて違いが出た時点で終わる。すると「一致した文字数」が処理時間に表れ、攻撃者が時間を測ってトークンを一文字ずつ推測する「タイミング攻撃」が理論上可能になる。<code>ConstantTimeCompare</code> は、一致・不一致によらず常に同じ時間で比較し、この漏洩を塞ぐ。認証情報の比較では標準的な作法である。</p>
+
+<h3>3.3 ロールとツールの認可(policy.go)</h3>
+<p>「どのロールがどのツールを使ってよいか」を判定するのが <code>policy</code> パッケージである。これは認証情報を扱わない、純粋な判定ロジックである。</p>
+<pre><code><span class="c">// RolePolicy holds glob-style allow/deny tool patterns. Deny wins over allow;</span>
+<span class="c">// anything not explicitly allowed is blocked (default deny).</span>
+<span class="k">type</span> RolePolicy <span class="k">struct</span> {
+	Allow []<span class="k">string</span>
+	Deny  []<span class="k">string</span>
+}</code></pre>
+<p>一つのロールは、許可パターンの一覧(<code>Allow</code>)と拒否パターンの一覧(<code>Deny</code>)を持つ。コメントが判定の3原則を述べている。<strong>拒否は許可に優先する</strong>。<strong>明示的に許可されていないものはすべて拒否</strong>する(default deny、既定拒否)。</p>
+<p>判定の本体 <code>Decide</code> を見る。</p>
+<pre><code><span class="k">func</span> (e *Engine) Decide(role, toolName <span class="k">string</span>) Decision {
+	rolePolicy, ok := e.roles[role]
+	<span class="k">if</span> !ok {
+		<span class="k">return</span> block(fmt.Sprintf(<span class="s">"unknown role or missing role policy: %s"</span>, role))
+	}
+	<span class="k">for</span> _, pattern := range rolePolicy.Deny {
+		<span class="k">if</span> matched, err := path.Match(pattern, toolName); err == nil && matched {
+			<span class="k">return</span> block(fmt.Sprintf(<span class="s">"tool denied for role %s: %s"</span>, role, pattern))
+		}
+	}
+	<span class="k">for</span> _, pattern := range rolePolicy.Allow {
+		<span class="k">if</span> matched, err := path.Match(pattern, toolName); err == nil && matched {
+			<span class="k">return</span> allow(<span class="s">"allowed"</span>)
+		}
+	}
+	<span class="k">return</span> block(fmt.Sprintf(<span class="s">"tool not allowed for role %s: %s"</span>, role, toolName))
+}</code></pre>
+<p>判定は次の順で進む。</p>
+<ol>
+<li>そのロールの方針が登録されていなければ拒否(未知のロールは通さない)。</li>
+<li>拒否パターンのいずれかに一致すれば拒否。<code>path.Match</code> はワイルドカード照合で、例えば <code>jq.*</code> は <code>jq.get_listed_info</code> などに一致する。</li>
+<li>許可パターンのいずれかに一致すれば許可。</li>
+<li>どちらにも一致しなければ拒否(既定拒否)。</li>
+</ol>
+<p>この関数は決定的である。同じ入力には常に同じ判定を返し、AIの気分や乱数に左右されない。セキュリティ上の判断を、非決定的なAIの外側の、この確定したコードに置いていることが要点である。</p>
+<p>実際のロール方針の一例として、投資シグナル収集ロールの定義を見る。</p>
+<pre><code><span class="s">"investment_signal_runner"</span>: {
+	Allow: []<span class="k">string</span>{
+		<span class="s">"x.search_posts_recent"</span>,
+		<span class="s">"slack.post_digest"</span>,
+	},
+	Deny: []<span class="k">string</span>{
+		<span class="s">"x.create_post"</span>,
+		<span class="s">"x.like_post"</span>,
+		<span class="s">"x.repost"</span>,
+		<span class="s">"x.follow_user"</span>,
+		<span class="s">"x.send_dm"</span>,
+		<span class="s">"jquants.*"</span>,
+		<span class="s">"trading.*"</span>,
+		<span class="c">// ... 中略 ...</span>
+	},
+},</code></pre>
+<p>このロールが許されるのは、Xの最近の投稿を検索すること(<code>x.search_posts_recent</code>)とSlackへの投稿(<code>slack.post_digest</code>)だけである。一方、Xへの書き込み(投稿・いいね・リポスト・フォロー・DM)、J-Quants関連、取引関連はすべて明示的に拒否される。「読むことはできるが書くことはできない」という制約が、コードとして固定されている。</p>
+
+<h3>3.4 git中継 — 発展的なプロキシ技法(gitrelay.go)</h3>
+<p>git中継は、本書で最も高度なプロキシ技法を含む。AIがコンテナ内で普通の <code>git clone</code> や <code>git push</code> を実行すると、その通信がauth-proxyを経由し、auth-proxyがGitHub向けの認証を代理で差し込んでGitHubへ中継する。AIはGitHubの認証情報を一切見ない。</p>
+<p>中継の本体は、Goの標準ライブラリ <code>httputil.ReverseProxy</code> を使う。これは「リバースプロキシ」を作るための部品で、要求を上流に転送し応答を戻す骨組みを提供する。7mimi-agent はこの骨組みに独自の振る舞いを差し込む。</p>
+<pre><code>	rp := &httputil.ReverseProxy{
+		FlushInterval: -1,
+		Transport: &http.Transport{
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			<span class="c">// Protocol-transparent relay: never let Go auto-negotiate/decompress</span>
+			<span class="c">// gzip on our behalf, or Content-Encoding/body bytes would diverge</span>
+			<span class="c">// from what upstream actually sent.</span>
+			DisableCompression: true,
+		},</code></pre>
+<p>3つの設定がgit通信特有の要求に対応している。</p>
+<ul>
+<li><code>FlushInterval: -1</code> は「受け取った端から即座に送れ」を意味する。gitのpack転送は要求と応答が交互に噛み合う対話的なやりとりで、溜め込むと停止(ハング)する。第2.7節の <code>Flush</code> と同じ発想である。</li>
+<li><code>DisableCompression: true</code> は「Goが勝手にgzip圧縮を交渉・解凍するな」を意味する。gitのデータはgit自身が管理する。プロキシが途中で解凍してしまうと、<code>Content-Encoding</code> ヘッダと実データが食い違い、gitのプロトコルが壊れる。<strong>透過的に、一バイトも変えずに中継する</strong>ためにこれを無効化する。</li>
+<li>各種タイムアウトは接続確立やヘッダ受信に上限を設けるが、応答本体の転送には全体の締め切りを設けない。大きなクローンが途中で打ち切られないようにするためである。</li>
+</ul>
+<p>次に <code>Director</code>(要求を上流向けに書き換える関数)を見る。ここに認証情報の差し込みがある。</p>
+<pre><code>		Director: <span class="k">func</span>(req *http.Request) {
+			req.URL.Scheme = upstreamURL.Scheme
+			req.URL.Host = upstreamURL.Host
+			req.Host = upstreamURL.Host
+			req.URL.Path = upstreamURL.Path + <span class="s">"/"</span> + owner + <span class="s">"/"</span> + repo + <span class="s">".git/"</span> + upstreamSuffix
+
+			req.Header.Del(<span class="s">"Authorization"</span>)
+			<span class="k">for</span> name := range req.Header {
+				<span class="k">if</span> strings.HasPrefix(strings.ToLower(name), <span class="s">"x-7mimi-"</span>) {
+					req.Header.Del(name)
+				}
+			}
+			req.Header.Set(<span class="s">"Authorization"</span>, <span class="s">"Basic "</span>+basicAuth(<span class="s">"x-access-token"</span>, token))
+		},</code></pre>
+<ul>
+<li>上流(GitHub)のスキーム・ホスト・パスを設定する。パスは <code>owner/repo.git/...</code> の形に組み立てる。</li>
+<li><code>req.Header.Del("Authorization")</code> で、AIが付けたセッショントークンを<strong>除去する</strong>。第2.6節の許可リストと同じ思想で、内部の合言葉を外部に漏らさない。</li>
+<li><code>X-7mimi-</code> で始まる内部ヘッダも除去する。</li>
+<li>そして <code>req.Header.Set("Authorization", "Basic "+...)</code> で、GitHub向けの認証を<strong>差し込む</strong>。ここで使う <code>token</code> は、GitHub App が発行した短命のインストールトークンである(第3.5節)。</li>
+</ul>
+<p>最後に <code>ModifyResponse</code>(応答を検査・書き換える関数)を見る。これはセキュリティ上の防御である。</p>
+<pre><code>		ModifyResponse: <span class="k">func</span>(resp *http.Response) <span class="k">error</span> {
+			<span class="k">if</span> resp.StatusCode &gt;= 300 && resp.StatusCode &lt; 400 {
+				location := resp.Header.Get(<span class="s">"Location"</span>)
+				<span class="k">if</span> location != <span class="s">""</span> {
+					locURL, err := url.Parse(location)
+					<span class="k">if</span> err == nil && locURL.Host != <span class="s">""</span> && locURL.Host != upstreamHost {
+						<span class="k">return</span> errors.New(<span class="s">"gitrelay: cross-host redirect blocked"</span>)
+					}
+					<span class="k">if</span> err == nil {
+						locURL.User = nil
+						resp.Header.Set(<span class="s">"Location"</span>, locURL.String())
+					}
+				}
+			}
+			statusCapture.statusCode = resp.StatusCode
+			<span class="k">return</span> nil
+		},</code></pre>
+<p><code>3xx</code> はリダイレクト(別の場所へ誘導する応答)である。上流が「別のホストへ行け」と誘導してきた場合、その誘導先へは今差し込んだGitHub認証が付いたまま追従してしまう恐れがある。そこで、誘導先のホストが本来の上流(GitHub)と異なれば、<strong>異なるホストへのリダイレクトを遮断する</strong>(エラーを返す)。同一ホスト内の誘導でも、URLに埋め込まれた認証情報(<code>locURL.User</code>)を除去する。認証情報が意図しない宛先へ漏れる経路を塞いでいる。</p>
+<p>この一連の技法 — 逐次フラッシュ、圧縮の無効化、認証情報の除去と差し込み、リダイレクトの検査 — は、いずれも「透過的に、かつ安全に」中継するための実務的な工夫である。単純な claude-proxy にはなかった、実プロトコルの機微に対応した層である。</p>
+
+<h3>3.5 GitHub App による短命トークンの発行(githubapp.go)</h3>
+<p>git中継が差し込むGitHub認証は、固定のパスワードではない。GitHub App の仕組みを使い、<strong>1時間で失効する使い捨てトークンを、必要になるたびにその場で発行する</strong>。漏れても被害が1時間・対象リポジトリに限定される。</p>
+<p>トークン発行の第一歩は、App の秘密鍵で署名した JWT(JSON Web Token)を作ることである。JWTは「ヘッダ・主張・署名」の3部をドットで繋いだ認証用の文字列である。</p>
+<pre><code><span class="c">// appJWT mints a short-lived RS256 App JWT per GitHub App auth requirements.</span>
+<span class="k">func</span> (t *TokenSource) appJWT() (<span class="k">string</span>, <span class="k">error</span>) {
+	now := time.Now()
+	header := <span class="k">map</span>[<span class="k">string</span>]<span class="k">string</span>{<span class="s">"alg"</span>: <span class="s">"RS256"</span>, <span class="s">"typ"</span>: <span class="s">"JWT"</span>}
+	claims := <span class="k">map</span>[<span class="k">string</span>]<span class="k">any</span>{
+		<span class="s">"iat"</span>: now.Add(-60 * time.Second).Unix(),
+		<span class="s">"exp"</span>: now.Add(540 * time.Second).Unix(),
+		<span class="s">"iss"</span>: t.appID,
+	}
+
+	headerJSON, _ := json.Marshal(header)
+	claimsJSON, _ := json.Marshal(claims)
+
+	signingInput := base64URLEncode(headerJSON) + <span class="s">"."</span> + base64URLEncode(claimsJSON)
+	digest := sha256.Sum256([]<span class="k">byte</span>(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, t.privateKey, crypto.SHA256, digest[:])
+	<span class="k">if</span> err != nil {
+		<span class="k">return</span> <span class="s">""</span>, errors.New(<span class="s">"failed to sign app jwt"</span>)
+	}
+
+	<span class="k">return</span> signingInput + <span class="s">"."</span> + base64URLEncode(signature), nil
+}</code></pre>
+<p>順に読む。</p>
+<ul>
+<li><code>header</code> は署名方式(<code>RS256</code>、RSA鍵とSHA-256を使う署名)と種別(<code>JWT</code>)を宣言する。</li>
+<li><code>claims</code> は主張である。<code>iat</code>(発行時刻、時計のずれを吸収するため60秒前に設定)、<code>exp</code>(失効時刻、9分後)、<code>iss</code>(発行者、App のID)を含む。</li>
+<li>ヘッダと主張をそれぞれJSON化し、base64URL符号化してドットで繋ぐ。これが「署名対象の文字列」<code>signingInput</code> である。</li>
+<li><code>sha256.Sum256</code> でその文字列のハッシュ(要約値)を計算し、<code>rsa.SignPKCS1v15</code> でApp秘密鍵を使って署名する。署名は「この文字列は確かにこの秘密鍵の持ち主が作った」ことを証明する。</li>
+<li>最後に、署名対象と署名をドットで繋いで完成したJWTを返す。</li>
+</ul>
+<p>このJWTをGitHubに提示すると、GitHubはApp公開鍵で署名を検証し、正当なら「インストールアクセストークン」を発行する。auth-proxy はそれを取得してキャッシュし(有効期間が短いので期限が近づくと再発行し)、第3.4節の <code>Director</code> でgit要求に差し込む。</p>
+<p>パッケージ冒頭のコメントが、このパッケージの守るべき一線を述べている。「App秘密鍵も、署名したJWTも、発行したインストールトークンも、決してログに残さない」。認証情報を扱うコードほど、それを漏らさないことに神経を使う。</p>
+
+<hr>
+
+<h2 id="c4">第4章 全体を貫く設計原則</h2>
+<p>2つのサービスを読み終えた。最後に、両者に共通する設計原則を明文化する。これらは個々のコードの背後にある一貫した思想であり、7mimi-agentのセキュリティ設計そのものである。</p>
+
+<h3>4.1 認証情報の境界</h3>
+<p>本物の認証情報は、それを必要とする境界サービスだけが保持する。claude-proxy は <code>ANTHROPIC_API_KEY</code> を、auth-proxy はGitHub App秘密鍵・Xトークン・Slackトークンを持つ。AIが動くagent-runner は、これらを一切持たない。持つのは、その場限りで失効する短命のセッショントークンだけである。認証情報は「中継する瞬間」にだけ、上流向けの要求に差し込まれる。</p>
+
+<h3>4.2 fail-closed と fail-open の使い分け</h3>
+<ul>
+<li><strong>セキュリティの根幹は fail-closed</strong>: 必須の認証情報が欠ければ起動を拒否(config.go)、検証を通らなければ要求を拒否(handleMessages、authorize)、設定が不完全な境界は経路自体を生やさない(mountGitRelay)、未知のロールや未許可ツールは拒否(Decide)。疑わしきは通さない。</li>
+<li><strong>補助機能は fail-open</strong>: 監査ログの書き出しに失敗しても本業を止めない(audit.go)。ログが本業を殺してはならない。</li>
+</ul>
+<p>この使い分けは、どこで安全側に倒し、どこで可用性を優先するかの明確な意思表示である。</p>
+
+<h3>4.3 許可リストと決定的判定</h3>
+<p>通してよいものを列挙する許可リスト方式(copyProxyHeaders、policy.Decide)を一貫して用いる。列挙し忘れは「漏れる」のではなく「通らない」方向に働くため、安全側に倒れる。そして、セキュリティ上の判定はすべて、非決定的なAIの外側にある確定したコードで行う。ロール認可、呼び出し回数の上限、ヘッダの取捨、リダイレクトの遮断 — いずれもAIの判断ではなくGoのコードが決める。AIには「何をしたいか」を委ね、「してよいか」「どう繋ぐか」は境界サービスが決める。</p>
+
+<h3>4.4 秘密を記録しない監査</h3>
+<p>監査は徹底するが、記録に秘密は残さない。監査イベントの型が、そもそも会話内容や認証情報を持てないように設計されている(audit.Event)。「いつ・誰が・何を・結果は」は残し、「中身」は残さない。</p>
+
+<hr>
+
+<h2 id="end">むすび</h2>
+<p>claude-proxy は「設定を読む→検証する→認証情報を差し込む→中継する→記録する」という骨格を最小の形で示し、auth-proxy はその骨格の上に、セッション管理・ロール認可・実プロトコルに対応した透過中継・短命トークン発行という層を重ねていた。</p>
+<p>これらのコードを貫くのは、「AIを信頼する」のではなく「AIが誤っても、あるいは乗っ取られても、システムとして壊れない側に置く」という設計思想である。認証情報を渡さず、経路を境界に限定し、判定を決定的なコードに委ね、すべてを(秘密を除いて)記録する。Go の標準ライブラリ — <code>net/http</code>、<code>httputil.ReverseProxy</code>、<code>crypto/*</code> — は、この思想を簡潔なコードで実現するのに十分な部品を提供している。</p>
+<p>本書で読んだのは200行と数百行の、決して大きくないプログラムである。しかし小さいからこそ、境界サービスが担うべき責務 — 認証情報の隔離、決定的な認可、透過的な中継、秘密を残さない監査 — が、余分なものなく現れている。</p>
+
+</main>
+</body>
+</html>
