@@ -63,6 +63,12 @@
   .theme-toggle { position: fixed; top: .8rem; right: .8rem; background: var(--card);
     border: 1px solid var(--border); color: var(--fg); border-radius: 6px; padding: .3rem .6rem;
     font-size: .8rem; cursor: pointer; font-family: sans-serif; }
+  figure { margin: 1.8rem 0; }
+  .mermaid { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.1rem; margin: 0; overflow-x: auto; text-align: center;
+    font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  figcaption { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: .85rem;
+    color: var(--muted); text-align: center; margin-top: .5rem; }
 </style>
 </head>
 <body>
@@ -96,6 +102,39 @@
 <li><strong>auth-proxy</strong>: GitHub・X・Slack・J-Quants への通信を中継する。GitHub App秘密鍵、Xトークン、Slackトークン等を保持する。</li>
 </ul>
 
+<figure>
+<div class="mermaid">
+flowchart LR
+  subgraph runner["agent-runner(AIが動くコンテナ)"]
+    AI["Claude(AI)&lt;br/&gt;認証情報:なし&lt;br/&gt;セッショントークンのみ"]
+  end
+  subgraph proxies["境界サービス(認証情報を保持)"]
+    CP["claude-proxy&lt;br/&gt;🔑 ANTHROPIC_API_KEY"]
+    AP["auth-proxy&lt;br/&gt;🔑 GitHub App / X / Slack"]
+  end
+  AI -- "セッショントークン" --&gt; CP
+  AI -- "セッショントークン" --&gt; AP
+  CP -- "🔑 APIキー注入" --&gt; ANT["Anthropic API"]
+  AP -- "🔑 各認証を注入" --&gt; EXT["GitHub / X / Slack / J-Quants"]
+</div>
+<figcaption>図1-1 プロキシの立ち位置。AIは認証情報を持たず、プロキシが中継の瞬間に代理で差し込む。</figcaption>
+</figure>
+
+<figure>
+<div class="mermaid">
+sequenceDiagram
+  participant AI as agent-runner(AI)
+  participant P as プロキシ
+  participant U as 外部サービス
+  AI-&gt;&gt;P: 要求(Authorization: Bearer セッショントークン)
+  Note over P: ①トークンを検証&lt;br/&gt;②本物の認証情報を差し込む
+  P-&gt;&gt;U: 要求(本物のAPIキー/トークン)
+  U--&gt;&gt;P: 応答
+  P--&gt;&gt;AI: 応答(認証情報は含まない)
+</div>
+<figcaption>図1-2 中継の基本パターン。左側の区間に本物の認証情報は存在せず、右側の区間で初めて現れる。</figcaption>
+</figure>
+
 <h3>1.2 HTTPの最小限の知識</h3>
 <p>両サービスはHTTP(HyperText Transfer Protocol)で通信する。HTTPは「要求(リクエスト)」と「応答(レスポンス)」の往復で成り立つ。理解に必要な用語を先に定義する。</p>
 <ul>
@@ -127,6 +166,17 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 
 <h2 id="c2">第2章 claude-proxy — もっとも単純な境界</h2>
 <p>claude-proxy は4ファイル・約200行の小さなプログラムである。単純であるがゆえに、プロキシの基本構造を学ぶ教材として適している。まずこのサービスを完全に読み解く。</p>
+
+<figure>
+<div class="mermaid">
+flowchart TB
+  M["main.go&lt;br/&gt;起動・待ち受け"] --&gt; C["config.go&lt;br/&gt;設定を環境変数から読む"]
+  M --&gt; PX["proxy.go&lt;br/&gt;中継の心臓部"]
+  PX --&gt; A["audit.go&lt;br/&gt;監査ログ(秘密は残さない)"]
+  PX --&gt; C
+</div>
+<figcaption>図2-0 claude-proxy の4ファイルの関係。本章はこの順に読み進める。</figcaption>
+</figure>
 
 <h3>2.1 設定を環境変数から読む(config.go)</h3>
 <p>プログラムは起動時に「どのポートで待ち受けるか」「どの認証情報を使うか」といった設定を必要とする。7mimi-agent では設定を<strong>環境変数</strong>から読む。環境変数とは、プログラムの外側(OSやコンテナ)から与えられる名前付きの値である。ソースコードに秘密情報を書き込まずに済む利点がある。</p>
@@ -201,6 +251,20 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 }</code></pre>
 <p><code>json.Marshal</code> が <code>Event</code> 構造体をJSON文字列(正確にはバイト列)に変換する。ここで注目すべきコメントが <code>fail-open</code> である。監査ログの書き出しに失敗しても、<code>return</code> するだけで何もしない。<strong>監査の失敗が本来の中継処理を止めてはならない</strong>という方針である。</p>
 <p>第2.1節の設定読み込みは fail-closed(欠けたら止める)、この監査は fail-open(失敗しても続ける)であった。この使い分けは意図的である。セキュリティの根幹(認証情報)は欠けたら止め、補助機能(ログ)は失敗しても本業を止めない。</p>
+
+<figure>
+<div class="mermaid">
+flowchart TB
+  E["Event 構造体&lt;br/&gt;記録できる項目"]
+  E --&gt; T["時刻 / セッションID / ロール"]
+  E --&gt; M["メソッド / パス / ステータス / 所要時間"]
+  E --&gt; D["判定(allow / block)/ 理由"]
+  N["型として持てない項目"]
+  N --&gt; X1["会話内容(ボディ)"]
+  N --&gt; X2["APIキー・トークン"]
+</div>
+<figcaption>図2-1 監査イベントの型。上段が記録する項目、下段が「型として持てない=構造的に残らない」項目。</figcaption>
+</figure>
 
 <h3>2.3 プログラムの起動(main.go)</h3>
 <p><code>main</code> 関数がプログラムの入口である。まず本体部分を見る。</p>
@@ -318,6 +382,22 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <li>ロールが空でないか。</li>
 </ol>
 <p>いずれの検査でも、失敗すれば <code>deny</code> して <code>return</code> で処理を打ち切る。これも fail-closed の実践である。要求が完全に条件を満たすまで、先へ進ませない。</p>
+
+<figure>
+<div class="mermaid">
+flowchart TB
+  S["要求を受信"] --&gt; Q1{"Bearerトークンあり?"}
+  Q1 -- いいえ --&gt; B1["401 で拒否"]
+  Q1 -- はい --&gt; Q2{"セッショントークン一致?"}
+  Q2 -- いいえ --&gt; B2["401 で拒否"]
+  Q2 -- はい --&gt; Q3{"セッションIDあり?"}
+  Q3 -- いいえ --&gt; B3["400 で拒否"]
+  Q3 -- はい --&gt; Q4{"ロールあり?"}
+  Q4 -- いいえ --&gt; B4["400 で拒否"]
+  Q4 -- はい --&gt; OK["APIキーを注入して中継へ"]
+</div>
+<figcaption>図2-2 handleMessages の検査フロー。4段階すべてを通過して初めて中継へ進む(fail-closed)。</figcaption>
+</figure>
 <p>検査を通過したら、いよいよ上流(Anthropic API)への要求を組み立てる。</p>
 <pre><code>	upstreamURL := strings.TrimRight(h.cfg.AnthropicBaseURL, <span class="s">"/"</span>) + r.URL.Path
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, r.Body)
@@ -341,6 +421,21 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <li><code>anthropic-version</code> ヘッダが未設定なら既定値を補う。</li>
 </ul>
 <p>つまり、agent-runner → claude-proxy の区間では要求はセッショントークンしか持たず、claude-proxy → Anthropic の区間で初めてAPIキーが付く。<strong>APIキーが存在するのはプロキシの内側だけ</strong>である。</p>
+
+<figure>
+<div class="mermaid">
+sequenceDiagram
+  participant AI as agent-runner
+  participant P as claude-proxy
+  participant AN as Anthropic API
+  AI-&gt;&gt;P: POST /v1/messages&lt;br/&gt;Authorization: Bearer セッショントークン&lt;br/&gt;X-7mimi-Session-Id / Role
+  Note over P: 検証OK後:&lt;br/&gt;・Authorization を除去&lt;br/&gt;・X-7mimi-* を除去&lt;br/&gt;・x-api-key を差し込む
+  P-&gt;&gt;AN: POST /v1/messages&lt;br/&gt;x-api-key: 本物のAPIキー
+  AN--&gt;&gt;P: ストリーミング応答
+  P--&gt;&gt;AI: 逐次フラッシュして転送
+</div>
+<figcaption>図2-3 認証情報の差し込み。左区間はセッショントークンのみ、右区間で初めて x-api-key が現れる。</figcaption>
+</figure>
 <p>上流へ送信し、応答を受け取る。</p>
 <pre><code>	resp, err := h.client.Do(upstreamReq)
 	<span class="k">if</span> err != nil {
@@ -387,6 +482,30 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <p>この方式が守っている重要な性質が、コメントに書かれている。<code>Authorization</code>(agent-runner が付けたセッショントークン)と <code>X-7mimi-*</code>(内部の属性情報)を<strong>上流に漏らさない</strong>。どちらも許可リストに載っていないので、確実に除去される。</p>
 <p>「拒否リスト」ではなく「許可リスト」を選ぶ理由は、安全側に倒れるからである。新しいヘッダが将来増えても、許可リストに明示的に加えない限り上流へは行かない。列挙し忘れによる漏洩が起きない。</p>
 
+<figure>
+<div class="mermaid">
+flowchart LR
+  subgraph in["受信ヘッダ"]
+    H1["Content-Type"]
+    H2["Accept"]
+    H3["anthropic-version"]
+    H4["Authorization(セッショントークン)"]
+    H5["X-7mimi-Role"]
+    H6["未知のヘッダ"]
+  end
+  G{"許可リストに一致?"}
+  H1 --&gt; G
+  H2 --&gt; G
+  H3 --&gt; G
+  H4 --&gt; G
+  H5 --&gt; G
+  H6 --&gt; G
+  G -- はい --&gt; PASS["上流へ転送"]
+  G -- いいえ --&gt; DROP["破棄(通さない)"]
+</div>
+<figcaption>図2-4 ヘッダの許可リスト。Content-Type/Accept/anthropic-* だけが通り、セッショントークンや内部ヘッダは破棄される。</figcaption>
+</figure>
+
 <h3>2.7 ストリーミングの中継(streamCopy)</h3>
 <p>大規模言語モデルの応答は、生成された順に少しずつ届く「ストリーミング」形式をとることが多い。この逐次性を保ったまま中継するのが <code>streamCopy</code> である。</p>
 <pre><code><span class="c">// streamCopy copies the upstream body flushing after each chunk so SSE</span>
@@ -416,6 +535,20 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <li>上流の読み取りが終端やエラーに達したら(<code>err != nil</code>)、ループを抜ける。</li>
 </ul>
 <p>もし <code>Flush</code> をしなければ、全応答が揃うまでクライアントは何も受け取れず、逐次表示ができない。この一行が、ストリーミング体験を成立させている。</p>
+
+<figure>
+<div class="mermaid">
+flowchart LR
+  subgraph noflush["Flush なし"]
+    N1["断片1"] --&gt; N2["断片2"] --&gt; N3["断片3"] --&gt; NB["溜めてから一括送信&lt;br/&gt;(揃うまで無表示)"]
+  end
+  subgraph flush["Flush あり"]
+    F1["断片1 → 即送信"] --&gt; F2["断片2 → 即送信"] --&gt; F3["断片3 → 即送信"]
+  end
+</div>
+<figcaption>図2-5 Flush の有無。ありの場合、生成された断片が生成そばから届き、逐次表示が成立する。</figcaption>
+</figure>
+
 <p>以上でclaude-proxyの全体を読み終えた。「設定を読む→検証する→認証情報を差し込む→中継する→記録する」という流れは、次章のauth-proxyでも共通する骨格である。</p>
 
 <hr>
@@ -430,6 +563,19 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <tr><td>Slack通知</td><td><code>/v1/slack/notify</code></td><td>Slackへの投稿</td><td>Slack botトークン</td></tr>
 </table>
 <p>加えて、これらを支える<strong>セッション管理</strong>(<code>/session/issue</code>)がある。本章では、起動時の組み立て、セッション管理、ロール認可、そしてgit中継における発展的なプロキシ技法を順に扱う。</p>
+
+<figure>
+<div class="mermaid">
+flowchart TB
+  MUX["auth-proxy(1つのHTTPサーバ)"]
+  MUX --&gt; T["/v1/tool/authorize&lt;br/&gt;ツール認可(判定のみ)"]
+  MUX --&gt; G["/git/...&lt;br/&gt;git中継&lt;br/&gt;🔑 GitHub App秘密鍵"]
+  MUX --&gt; MC["/mcp&lt;br/&gt;MCPサーバ&lt;br/&gt;🔑 X / J-Quantsトークン"]
+  MUX --&gt; SL["/v1/slack/notify&lt;br/&gt;Slack通知&lt;br/&gt;🔑 Slack botトークン"]
+  MUX --&gt; SE["/session/issue&lt;br/&gt;セッション発行(土台)"]
+</div>
+<figcaption>図3-0 auth-proxy が同居させる4つの境界と、それを支えるセッション管理。</figcaption>
+</figure>
 
 <h3>3.1 起動時に境界を組み立てる(main.go)</h3>
 <p>auth-proxy の <code>main</code> 関数は、各境界を条件付きで組み立てる。</p>
@@ -475,8 +621,33 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <p>セッショントークンが未設定なら、<code>git relay disabled</code> とだけ記録して <code>return</code> する。<strong>経路そのものを登録しない</strong>。登録しなければ <code>/git/</code> へのアクセスは「存在しないパス」として <code>404</code> になる。GitHub App の認証情報がなければ、同様に登録しない。</p>
 <p>これは fail-closed の一形態である。設定が不完全な機能を「一見動くが実は無防備」な状態で公開するのではなく、そもそも生やさない。記録されるメッセージにも認証情報は一切含まれない。</p>
 
+<figure>
+<div class="mermaid">
+flowchart TB
+  START["mountGitRelay 実行"] --&gt; Q1{"セッショントークン設定済み?"}
+  Q1 -- いいえ --&gt; SKIP1["経路を生やさない&lt;br/&gt;→ /git/ は 404"]
+  Q1 -- はい --&gt; Q2{"GitHub App認証情報あり?"}
+  Q2 -- いいえ --&gt; SKIP2["経路を生やさない&lt;br/&gt;→ /git/ は 404"]
+  Q2 -- はい --&gt; MOUNT["/git/ を登録して有効化"]
+</div>
+<figcaption>図3-1 条件付き有効化。必要な認証情報が揃わない境界は「無防備に公開」ではなく「そもそも存在しない」。</figcaption>
+</figure>
+
 <h3>3.2 セッション管理 — 短命でロールに縛られたトークン(session.go)</h3>
 <p>auth-proxy の認可設計の中核が、<code>session</code> パッケージである。目的は、AIエージェントに渡すトークンを「短命で、特定のロールに縛られ、使用回数に上限がある」ものにすることである。</p>
+<figure>
+<div class="mermaid">
+stateDiagram-v2
+  [*] --&gt; 発行済: Issue(role) 32バイト乱数
+  発行済 --&gt; 発行済: Charge() 呼び出し+1(上限内)
+  発行済 --&gt; 拒否: Charge() 上限超過
+  発行済 --&gt; 失効: 35分経過(TTL)
+  失効 --&gt; [*]: 遅延失効 または 定期sweep
+  拒否 --&gt; [*]
+</div>
+<figcaption>図3-2 セッショントークンの一生。発行 → 使用(回数制限)→ 失効(TTL)→ 削除。</figcaption>
+</figure>
+
 <p>まず、トークン一件分の情報を表す構造体と、それを束ねる保管庫を見る。</p>
 <pre><code><span class="k">const</span> defaultTTL = 35 * time.Minute
 <span class="k">const</span> sweepInterval = 5 * time.Minute
@@ -549,6 +720,21 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 		}
 		<span class="c">// ... ロールを読み取り、store.Issue でトークンを発行して返す ...</span></code></pre>
 <p>トークンを発行できるのは、<strong>静的な管理トークン(<code>staticToken</code>)を持つ者だけ</strong>である。これはオーケストレーター(全体を統括するPython側)だけが保持する。AIエージェント自身はトークンを発行できない。オーケストレーターがAIを起動する直前に、そのAIのロールに縛られた短命トークンを発行し、AIに渡す。</p>
+
+<figure>
+<div class="mermaid">
+sequenceDiagram
+  participant O as オーケストレーター&lt;br/&gt;(静的な管理トークンを保持)
+  participant AP as auth-proxy
+  participant AI as agent-runner(AI)
+  O-&gt;&gt;AP: POST /session/issue&lt;br/&gt;Bearer 管理トークン, role=ai_it_topic_runner
+  Note over AP: 管理トークンを定数時間比較&lt;br/&gt;→ ロール付き短命トークンを発行
+  AP--&gt;&gt;O: token, ttl(35分)
+  O-&gt;&gt;AI: 短命トークンを渡してAIを起動
+  AI-&gt;&gt;AP: /mcp や /git を短命トークンで呼ぶ
+</div>
+<figcaption>図3-3 誰が何を持つか。管理トークンはオーケストレーターだけ、AIは短命トークンだけ。AIは自分でトークンを発行できない。</figcaption>
+</figure>
 <p>ここで <code>subtle.ConstantTimeCompare</code> に注目する。通常の文字列比較(<code>==</code>)は、先頭から比べて違いが出た時点で終わる。すると「一致した文字数」が処理時間に表れ、攻撃者が時間を測ってトークンを一文字ずつ推測する「タイミング攻撃」が理論上可能になる。<code>ConstantTimeCompare</code> は、一致・不一致によらず常に同じ時間で比較し、この漏洩を塞ぐ。認証情報の比較では標準的な作法である。</p>
 
 <h3>3.3 ロールとツールの認可(policy.go)</h3>
@@ -586,6 +772,20 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <li>どちらにも一致しなければ拒否(既定拒否)。</li>
 </ol>
 <p>この関数は決定的である。同じ入力には常に同じ判定を返し、AIの気分や乱数に左右されない。セキュリティ上の判断を、非決定的なAIの外側の、この確定したコードに置いていることが要点である。</p>
+
+<figure>
+<div class="mermaid">
+flowchart TB
+  IN["Decide(ロール, ツール名)"] --&gt; Q0{"ロールが登録済み?"}
+  Q0 -- いいえ --&gt; B0["拒否(未知のロール)"]
+  Q0 -- はい --&gt; Q1{"拒否リストに一致?"}
+  Q1 -- はい --&gt; B1["拒否(拒否は許可に優先)"]
+  Q1 -- いいえ --&gt; Q2{"許可リストに一致?"}
+  Q2 -- はい --&gt; A["許可"]
+  Q2 -- いいえ --&gt; B2["拒否(既定拒否)"]
+</div>
+<figcaption>図3-4 Decide の判定順。①未知ロール拒否 → ②拒否優先 → ③許可 → ④どれでもなければ既定拒否。</figcaption>
+</figure>
 <p>実際のロール方針の一例として、投資シグナル収集ロールの定義を見る。</p>
 <pre><code><span class="s">"investment_signal_runner"</span>: {
 	Allow: []<span class="k">string</span>{
@@ -607,6 +807,26 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 
 <h3>3.4 git中継 — 発展的なプロキシ技法(gitrelay.go)</h3>
 <p>git中継は、本書で最も高度なプロキシ技法を含む。AIがコンテナ内で普通の <code>git clone</code> や <code>git push</code> を実行すると、その通信がauth-proxyを経由し、auth-proxyがGitHub向けの認証を代理で差し込んでGitHubへ中継する。AIはGitHubの認証情報を一切見ない。</p>
+<figure>
+<div class="mermaid">
+sequenceDiagram
+  participant AI as AI(git clone/push)
+  participant AP as gitrelay
+  participant GA as GitHub App
+  participant GH as GitHub
+  AI-&gt;&gt;AP: git 要求&lt;br/&gt;Bearer 短命セッショントークン
+  Note over AP: authorize():&lt;br/&gt;静的 or 短命トークンとして有効か
+  AP-&gt;&gt;GA: インストールトークンを取得(第3.5節)
+  GA--&gt;&gt;AP: 1時間で失効する使い捨てトークン
+  Note over AP: Director():&lt;br/&gt;・Authorization 除去&lt;br/&gt;・X-7mimi-* 除去&lt;br/&gt;・Basic x-access-token 注入
+  AP-&gt;&gt;GH: git 要求(GitHub認証付き)
+  GH--&gt;&gt;AP: pack 応答
+  Note over AP: ModifyResponse():&lt;br/&gt;別ホストへのリダイレクトを遮断
+  AP--&gt;&gt;AI: 透過中継(gzip無変換, 逐次flush)
+</div>
+<figcaption>図3-5 git中継の全体像。AIはGitHub認証を一切見ず、gitrelayが短命トークンを取得して代理注入する。</figcaption>
+</figure>
+
 <p>中継の本体は、Goの標準ライブラリ <code>httputil.ReverseProxy</code> を使う。これは「リバースプロキシ」を作るための部品で、要求を上流に転送し応答を戻す骨組みを提供する。7mimi-agent はこの骨組みに独自の振る舞いを差し込む。</p>
 <pre><code>	rp := &httputil.ReverseProxy{
 		FlushInterval: -1,
@@ -701,6 +921,19 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <li>最後に、署名対象と署名をドットで繋いで完成したJWTを返す。</li>
 </ul>
 <p>このJWTをGitHubに提示すると、GitHubはApp公開鍵で署名を検証し、正当なら「インストールアクセストークン」を発行する。auth-proxy はそれを取得してキャッシュし(有効期間が短いので期限が近づくと再発行し)、第3.4節の <code>Director</code> でgit要求に差し込む。</p>
+
+<figure>
+<div class="mermaid">
+flowchart LR
+  PK["App秘密鍵&lt;br/&gt;(auth-proxyのみ保持)"] --&gt; SIGN["ヘッダ+主張を&lt;br/&gt;RS256署名"]
+  SIGN --&gt; JWT["App JWT&lt;br/&gt;(9分で失効)"]
+  JWT --&gt; GH["GitHub&lt;br/&gt;公開鍵で署名検証"]
+  GH --&gt; TOK["インストールトークン&lt;br/&gt;(1時間で失効・対象repo限定)"]
+  TOK --&gt; CACHE["キャッシュ&lt;br/&gt;期限が近づくと再発行"]
+  CACHE --&gt; INJ["git要求に Basic 認証として注入"]
+</div>
+<figcaption>図3-6 短命トークンの発行連鎖。秘密鍵は外に出ず、漏れても被害が1時間・対象リポジトリに限定される。</figcaption>
+</figure>
 <p>パッケージ冒頭のコメントが、このパッケージの守るべき一線を述べている。「App秘密鍵も、署名したJWTも、発行したインストールトークンも、決してログに残さない」。認証情報を扱うコードほど、それを漏らさないことに神経を使う。</p>
 
 <hr>
@@ -711,12 +944,48 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <h3>4.1 認証情報の境界</h3>
 <p>本物の認証情報は、それを必要とする境界サービスだけが保持する。claude-proxy は <code>ANTHROPIC_API_KEY</code> を、auth-proxy はGitHub App秘密鍵・Xトークン・Slackトークンを持つ。AIが動くagent-runner は、これらを一切持たない。持つのは、その場限りで失効する短命のセッショントークンだけである。認証情報は「中継する瞬間」にだけ、上流向けの要求に差し込まれる。</p>
 
+<figure>
+<div class="mermaid">
+flowchart TB
+  subgraph AIZONE["AIの領域(認証情報ゼロ)"]
+    RUN["agent-runner&lt;br/&gt;短命セッショントークンのみ"]
+  end
+  subgraph BOUNDARY["境界サービス(認証情報を隔離保持)"]
+    CP["claude-proxy&lt;br/&gt;🔑 ANTHROPIC_API_KEY"]
+    AP["auth-proxy&lt;br/&gt;🔑 GitHub App秘密鍵&lt;br/&gt;🔑 X_BEARER_TOKEN&lt;br/&gt;🔑 SLACK_BOT_TOKEN&lt;br/&gt;🔑 JQUANTS_REFRESH_TOKEN"]
+  end
+  RUN --&gt; CP
+  RUN --&gt; AP
+  CP -. "注入の瞬間のみ" .-&gt; ANT["Anthropic"]
+  AP -. "注入の瞬間のみ" .-&gt; EXT["GitHub / X / Slack / J-Quants"]
+</div>
+<figcaption>図4-1 認証情報の所在マップ。すべての鍵は境界サービス側にあり、AIの領域には一つも存在しない。</figcaption>
+</figure>
+
 <h3>4.2 fail-closed と fail-open の使い分け</h3>
 <ul>
 <li><strong>セキュリティの根幹は fail-closed</strong>: 必須の認証情報が欠ければ起動を拒否(config.go)、検証を通らなければ要求を拒否(handleMessages、authorize)、設定が不完全な境界は経路自体を生やさない(mountGitRelay)、未知のロールや未許可ツールは拒否(Decide)。疑わしきは通さない。</li>
 <li><strong>補助機能は fail-open</strong>: 監査ログの書き出しに失敗しても本業を止めない(audit.go)。ログが本業を殺してはならない。</li>
 </ul>
 <p>この使い分けは、どこで安全側に倒し、どこで可用性を優先するかの明確な意思表示である。</p>
+
+<figure>
+<div class="mermaid">
+flowchart LR
+  subgraph FC["fail-closed(疑わしきは止める)"]
+    direction TB
+    C1["必須の認証情報が欠ける → 起動拒否"]
+    C2["検証を通らない → 要求拒否"]
+    C3["設定不完全な境界 → 経路を生やさない"]
+    C4["未知ロール・未許可ツール → 拒否"]
+  end
+  subgraph FO["fail-open(失敗しても続ける)"]
+    direction TB
+    O1["監査ログ書き出し失敗 → 本業は止めない"]
+  end
+</div>
+<figcaption>図4-2 fail-closed と fail-open の使い分け。セキュリティの根幹は止め、補助機能は本業を殺さない。</figcaption>
+</figure>
 
 <h3>4.3 許可リストと決定的判定</h3>
 <p>通してよいものを列挙する許可リスト方式(copyProxyHeaders、policy.Decide)を一貫して用いる。列挙し忘れは「漏れる」のではなく「通らない」方向に働くため、安全側に倒れる。そして、セキュリティ上の判定はすべて、非決定的なAIの外側にある確定したコードで行う。ロール認可、呼び出し回数の上限、ヘッダの取捨、リダイレクトの遮断 — いずれもAIの判断ではなくGoのコードが決める。AIには「何をしたいか」を委ね、「してよいか」「どう繋ぐか」は境界サービスが決める。</p>
@@ -732,5 +1001,14 @@ Authorization: Basic &lt;base64でエンコードした「利用者名:パスワ
 <p>本書で読んだのは200行と数百行の、決して大きくないプログラムである。しかし小さいからこそ、境界サービスが担うべき責務 — 認証情報の隔離、決定的な認可、透過的な中継、秘密を残さない監査 — が、余分なものなく現れている。</p>
 
 </main>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  function themeIsDark() {
+    var t = document.documentElement.getAttribute("data-theme");
+    if (t) return t === "dark";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  mermaid.initialize({ startOnLoad: true, theme: themeIsDark() ? "dark" : "default", securityLevel: "loose" });
+</script>
 </body>
 </html>
