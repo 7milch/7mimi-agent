@@ -48,6 +48,16 @@ spec:
                 secretKeyRef:
                   name: 7mimi-agent-secrets
                   key: ANTHROPIC_API_KEY
+            # claude-proxy validates the scheduler's Bearer token against
+            # CLAUDE_PROXY_DEV_TOKEN (services/claude-proxy config). Wire it
+            # to the SAME secret key the scheduler reads as
+            # CLAUDE_PROXY_SESSION_TOKEN, or every request would 401 against
+            # the compiled-in default.
+            - name: CLAUDE_PROXY_DEV_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: 7mimi-agent-secrets
+                  key: CLAUDE_PROXY_SESSION_TOKEN
           livenessProbe:
             exec:
               command: ["/claude-proxy", "-healthcheck"]

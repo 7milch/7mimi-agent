@@ -95,6 +95,28 @@ class KustomizeRenderTest(unittest.TestCase):
                         )
                         self.assertIn("secretKeyRef", env["valueFrom"])
 
+    def test_claude_proxy_dev_token_wired_to_same_secret_key_as_scheduler(self) -> None:
+        """claude-proxy validates the scheduler's Bearer against its
+        CLAUDE_PROXY_DEV_TOKEN env (services/claude-proxy config). Both
+        sides must read the SAME out-of-band secret key, or every
+        scheduler request 401s against the compiled-in dev default."""
+        envs: dict[str, dict] = {}
+        for deployment in self.by_kind.get("Deployment", []):
+            name = deployment["metadata"]["name"]
+            for container in deployment["spec"]["template"]["spec"]["containers"]:
+                for env in container.get("env") or []:
+                    envs[f"{name}/{env['name']}"] = env
+        proxy_side = envs.get("claude-proxy/CLAUDE_PROXY_DEV_TOKEN")
+        scheduler_side = envs.get("scheduler/CLAUDE_PROXY_SESSION_TOKEN")
+        self.assertIsNotNone(proxy_side, "claude-proxy must wire CLAUDE_PROXY_DEV_TOKEN")
+        self.assertIsNotNone(scheduler_side, "scheduler must wire CLAUDE_PROXY_SESSION_TOKEN")
+        self.assertEqual(
+            proxy_side["valueFrom"]["secretKeyRef"],
+            scheduler_side["valueFrom"]["secretKeyRef"],
+            "claude-proxy CLAUDE_PROXY_DEV_TOKEN and scheduler CLAUDE_PROXY_SESSION_TOKEN "
+            "must reference the same Secret name/key",
+        )
+
     def test_no_latest_image_tag(self) -> None:
         for deployment in self.by_kind.get("Deployment", []):
             for container in deployment["spec"]["template"]["spec"]["containers"]:
