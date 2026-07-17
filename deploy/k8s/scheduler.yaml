@@ -147,6 +147,20 @@ spec:
               value: "10001"
             - name: RUNNER_GID
               value: "10001"
+            # Issue #31: KubernetesClaudeLauncher (k8s_claude_launcher.py)
+            # wiring for the claude-CLI Job. RUNNER_MCP_URL is an explicit
+            # override of _direct_mcp_server_url()'s RUNNER_NETWORK-based
+            # split (claude_digest.py) -- without it, the k8s launcher would
+            # fall through to the docker-compose/local-dev default
+            # (host.docker.internal), which is unreachable from a k8s Job.
+            # RUNNER_EGRESS_PROXY forces the claude-CLI Job's WebFetch
+            # traffic through egress-proxy (ADR-025/032), matching the
+            # RUNNER_NETWORK branch's HTTPS_PROXY/HTTP_PROXY wiring in the
+            # docker launcher.
+            - name: RUNNER_MCP_URL
+              value: http://auth-proxy:18081/mcp
+            - name: RUNNER_EGRESS_PROXY
+              value: http://egress-proxy:18082
           volumeMounts:
             - name: config
               mountPath: /app/config

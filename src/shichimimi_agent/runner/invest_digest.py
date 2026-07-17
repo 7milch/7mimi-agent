@@ -29,6 +29,8 @@ from shichimimi_agent.runner.claude_digest import (
     DIRECT_MCP_TOOL_NAMES,
     build_direct_mcp_config,
     build_docker_command,
+    error_excerpt,
+    run_claude_via_kubernetes,
 )
 from shichimimi_agent.runner.mcp_session import issue_session
 from shichimimi_agent.security.policy_engine import PolicyEngine
@@ -150,22 +152,35 @@ def run_invest_digest(
 
     prompt = build_invest_digest_prompt()
 
-    cmd = build_docker_command(
-        workspace=workspace,
-        session_id=session_id,
-        role=role,
-        prompt=prompt,
-        options=options,  # type: ignore[arg-type]  # duck-typed: same fields as ClaudeDigestOptions
-        allowed_tools=INVEST_DIRECT_MCP_ALLOWED_TOOLS,
-        include_git_relay=False,
-        mcp_config=mcp_config,
-    )
-    completed = subprocess.run(
-        cmd, cwd=config.root, text=True, capture_output=True, timeout=options.timeout_seconds
-    )
+    if os.environ.get("RUNNER_BACKEND") == "kubernetes":
+        exit_code, stdout, stderr = run_claude_via_kubernetes(
+            workspace=workspace,
+            session_id=session_id,
+            role=role,
+            prompt=prompt,
+            options=options,  # type: ignore[arg-type]  # duck-typed: same fields as ClaudeDigestOptions
+            allowed_tools=INVEST_DIRECT_MCP_ALLOWED_TOOLS,
+            include_git_relay=False,
+            mcp_config=mcp_config,
+        )
+    else:
+        cmd = build_docker_command(
+            workspace=workspace,
+            session_id=session_id,
+            role=role,
+            prompt=prompt,
+            options=options,  # type: ignore[arg-type]  # duck-typed: same fields as ClaudeDigestOptions
+            allowed_tools=INVEST_DIRECT_MCP_ALLOWED_TOOLS,
+            include_git_relay=False,
+            mcp_config=mcp_config,
+        )
+        completed = subprocess.run(
+            cmd, cwd=config.root, text=True, capture_output=True, timeout=options.timeout_seconds
+        )
+        exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
 
     digest_text: str | None = None
-    if completed.returncode == 0:
+    if exit_code == 0:
         digest_text = _read_digest(workspace)
 
     published = False
@@ -219,14 +234,15 @@ def run_invest_digest(
         metadata={
             "chunks": chunks,
             "chars": chars,
-            "exit_code": completed.returncode,
+            "exit_code": exit_code,
+            "error": error_excerpt(stderr) if exit_code != 0 else None,
         },
     )
 
     return InvestDigestResult(
-        exit_code=completed.returncode if published else (completed.returncode or 1),
-        stdout=completed.stdout,
-        stderr=completed.stderr,
+        exit_code=exit_code if published else (exit_code or 1),
+        stdout=stdout,
+        stderr=stderr,
         workspace=workspace,
         published=published,
         chunks=chunks,

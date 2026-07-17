@@ -70,6 +70,8 @@ kubectl create secret docker-registry ghcr-pull-secret \
 
 `GITHUB_APP_INSTALLATION_ID` / `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` は `optional: true` の secretKeyRef なので、値を持たない場合は該当行を省いてよい(auth-proxy 側の該当機能のみ無効化される)。
 
+**投入前の非空チェック(必須)**: `.env` から値を流し込む場合、対象キーが空文字でないことを必ず確認すること(例: `. ./.env; echo ${#AUTH_PROXY_SESSION_TOKEN}`)。空値はハッシュ照合による突合をすり抜け、auth-proxy は該当エンドポイントを mount しない・claude-proxy は既定トークンにフォールバックするなど、原因の分かりにくい機能不全になる(issue #30 で実例あり)。
+
 注記: ghcr への **push** credential は GitHub Actions 側(ワークフローの `GITHUB_TOKEN`、`packages: write` 権限)であり、k8s 側の `ghcr-pull-secret`(pull 用の Personal Access Token または同等の read:packages 権限を持つトークン)とは別管理である。
 
 ## イメージ供給と更新フロー
@@ -118,4 +120,4 @@ PYTHONPATH=src python3 -m shichimimi_agent run-job ai-it-x-daily-digest --dry-ru
 - `local-path` PVC はノードの hostPath 実体でバックアップ無し。SQLite・セッション成果物の耐久性はノードディスクに依存する。
 - scheduler は `TZ=Asia/Tokyo` 前提(ADR-022)。
 - `nodeSelector` でノードを固定している(`local-path` のノードアフィニティに合わせるため)。
-- in-cluster runner が現時点で実行できるのは `ai_it_topic_runner` のみ。`claude_digest`(ADR-021)系のネスト docker 起動は k8s Pod 内では成立せず、in-cluster での document 生成有効化は別 issue で再設計する(ADR-031 のスコープ外)。
+- digest(`claude_digest` / `invest_digest`)は `RUNNER_BACKEND=kubernetes` のとき k8s Job として Claude CLI を実行する(ADR-033、issue #31)。invest digest の k3s 実機での Slack 配送検証は未実施(Slack credential 設定後に別途確認)。

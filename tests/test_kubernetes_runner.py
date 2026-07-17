@@ -371,6 +371,50 @@ class WaitForCompletionTest(unittest.TestCase):
                     backend._wait_for_completion(namespace="test-ns", job_name="job-1")
         self.assertIn("boom", str(ctx.exception))
 
+    def test_failed_status_includes_both_reason_and_message_when_both_present(self) -> None:
+        """Tech-lead review (Issue #31): dropping either `reason` (a short,
+        stable machine code like BackoffLimitExceeded/DeadlineExceeded) or
+        `message` (the human-readable detail) loses information a caller
+        needs for post-mortem, especially once a k8s Job's ttlSecondsAfterFinished
+        reaps the Pod and its events."""
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = KubernetesRunnerBackend(root=Path(tmp), options=_options(Path(tmp)))
+            response = {
+                "status": {
+                    "failed": 1,
+                    "conditions": [{"type": "Failed", "reason": "DeadlineExceeded", "message": "Job was active longer than specified deadline"}],
+                }
+            }
+            with mock.patch.object(backend, "_api_request", return_value=response):
+                with self.assertRaises(RuntimeError) as ctx:
+                    backend._wait_for_completion(namespace="test-ns", job_name="job-1")
+        message = str(ctx.exception)
+        self.assertIn("DeadlineExceeded", message)
+        self.assertIn("Job was active longer than specified deadline", message)
+
+    def test_failed_status_with_reason_only_still_surfaces_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = KubernetesRunnerBackend(root=Path(tmp), options=_options(Path(tmp)))
+            response = {
+                "status": {
+                    "failed": 1,
+                    "conditions": [{"type": "Failed", "reason": "Evicted"}],
+                }
+            }
+            with mock.patch.object(backend, "_api_request", return_value=response):
+                with self.assertRaises(RuntimeError) as ctx:
+                    backend._wait_for_completion(namespace="test-ns", job_name="job-1")
+        self.assertIn("Evicted", str(ctx.exception))
+
+    def test_failed_status_with_no_conditions_falls_back_to_generic_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = KubernetesRunnerBackend(root=Path(tmp), options=_options(Path(tmp)))
+            response = {"status": {"failed": 1, "conditions": []}}
+            with mock.patch.object(backend, "_api_request", return_value=response):
+                with self.assertRaises(RuntimeError) as ctx:
+                    backend._wait_for_completion(namespace="test-ns", job_name="job-1")
+        self.assertIn("Job reported failed status", str(ctx.exception))
+
     def test_timeout_raises_runtime_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             backend = KubernetesRunnerBackend(

@@ -2,21 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-import ssl
-import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .backend import RunnerBackend, RunnerExecutionResult, RunnerTask
-
-# In-cluster ServiceAccount projection (k3s / any k8s). BoundServiceAccountToken
-# (default since k8s 1.21+) rotates the token file periodically, so callers
-# must re-read it per request rather than caching it.
-_SA_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
-_DEFAULT_API_SERVER = "https://kubernetes.default.svc"
+from .k8s_api_client import DEFAULT_API_SERVER as _DEFAULT_API_SERVER
+from .k8s_api_client import SA_DIR as _SA_DIR
+from .k8s_api_client import KubernetesApiClientMixin
 
 
 @dataclass(frozen=True)
@@ -74,15 +67,16 @@ class KubernetesRunnerOptions:
     request_timeout_seconds: float = 30.0
 
 
-class KubernetesRunnerBackend(RunnerBackend):
+class KubernetesRunnerBackend(KubernetesApiClientMixin, RunnerBackend):
     """Runs a task as a batch/v1 Job on the in-cluster k3s API (Issue #29).
 
-    Talks to the API server with stdlib `urllib` only (no `kubernetes`
-    package, per repo convention). Job completion is observed by polling
-    `.status` (no watch), and the result payload is read back from the
-    shared PVC (`.sessions/<session_id>/result.json`, written by
-    `runner-execute` -- see cli.py `cmd_runner_execute`) rather than from Pod
-    logs, since logs are not a stable machine-readable channel.
+    The in-cluster REST client + Job-completion polling (`_read_token`,
+    `_namespace`, `_ssl_context`, `_api_request`, `_wait_for_completion`) live
+    in `KubernetesApiClientMixin` (k8s_api_client.py, Issue #31), shared with
+    `KubernetesClaudeLauncher` (k8s_claude_launcher.py). The result payload is
+    read back from the shared PVC (`.sessions/<session_id>/result.json`,
+    written by `runner-execute` -- see cli.py `cmd_runner_execute`) rather
+    than from Pod logs, since logs are not a stable machine-readable channel.
 
     `root` must be the same path the scheduler and runner Job both mount the
     shared PVC at (`/app` in-cluster, matching the `find_project_root()`
@@ -93,43 +87,8 @@ class KubernetesRunnerBackend(RunnerBackend):
     def __init__(self, *, root: Path, options: KubernetesRunnerOptions | None = None) -> None:
         self.root = root.resolve()
         self.options = options or KubernetesRunnerOptions()
-        self._namespace_cache: str | None = None
+        self._init_k8s_api_client()
         self._configmap_name_cache: str | None = None
-
-    # -- k8s API plumbing, kept as thin wrappers so tests can mock just this layer --
-
-    def _read_token(self) -> str:
-        return self.options.token_path.read_text(encoding="utf-8").strip()
-
-    def _namespace(self) -> str:
-        if self.options.namespace:
-            return self.options.namespace
-        if self._namespace_cache is None:
-            self._namespace_cache = self.options.namespace_path.read_text(encoding="utf-8").strip()
-        return self._namespace_cache
-
-    def _ssl_context(self) -> ssl.SSLContext:
-        return ssl.create_default_context(cafile=str(self.options.ca_cert_path))
-
-    def _api_request(self, method: str, path: str, *, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        url = f"{self.options.api_server}{path}"
-        data = json.dumps(body).encode("utf-8") if body is not None else None
-        request = urllib.request.Request(url, data=data, method=method)
-        request.add_header("Authorization", f"Bearer {self._read_token()}")
-        request.add_header("Accept", "application/json")
-        if data is not None:
-            request.add_header("Content-Type", "application/json")
-        try:
-            with urllib.request.urlopen(request, context=self._ssl_context(), timeout=self.options.request_timeout_seconds) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"kubernetes API {method} {path} failed: {exc.code} {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"kubernetes API {method} {path} unreachable: {exc.reason}") from exc
-        if not raw:
-            return {}
-        return json.loads(raw)
 
     # -- ConfigMap name resolution --
 
@@ -313,24 +272,6 @@ class KubernetesRunnerBackend(RunnerBackend):
         error_type = error.get("type", "Error") if isinstance(error, dict) else "Error"
         error_message = error.get("message", "") if isinstance(error, dict) else str(error)
         return f"{job_level_message}; runner-execute reported {error_type}: {error_message}"
-
-    def _wait_for_completion(self, *, namespace: str, job_name: str) -> None:
-        deadline = time.monotonic() + self.options.timeout_seconds
-        while True:
-            job = self._api_request("GET", f"/apis/batch/v1/namespaces/{namespace}/jobs/{job_name}")
-            status = job.get("status") or {}
-            if int(status.get("succeeded") or 0) >= 1:
-                return
-            if int(status.get("failed") or 0) >= 1:
-                conditions = status.get("conditions") or []
-                reason = next(
-                    (c.get("message") or c.get("reason") for c in conditions if c.get("type") == "Failed"),
-                    "runner Job reported failed status",
-                )
-                raise RuntimeError(f"runner Job {namespace}/{job_name} failed: {reason}")
-            if time.monotonic() > deadline:
-                raise RuntimeError(f"runner Job {namespace}/{job_name} did not complete within {self.options.timeout_seconds}s")
-            time.sleep(self.options.poll_interval_seconds)
 
     def _collect_result(self, task: RunnerTask) -> RunnerExecutionResult:
         result_path = self.root / ".sessions" / task.session_id / "result.json"

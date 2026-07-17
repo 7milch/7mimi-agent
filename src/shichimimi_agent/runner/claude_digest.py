@@ -111,7 +111,47 @@ def build_digest_prompt(*, notes_repo: str, target_relative_path: str, git_proxy
 """
 
 
-def build_docker_command(
+# Tech-lead review (Issue #31): bounds how much of stderr goes into
+# repository.record_document metadata -- on the k8s path this is where the
+# Job's failure condition reason/message ends up (k8s_claude_launcher.py's
+# run()), which is otherwise unrecoverable post-mortem once
+# ttlSecondsAfterFinished (600s) reaps the Job/Pod and its events. Bounded,
+# not unbounded, since it's still an arbitrary process's stderr.
+MAX_ERROR_METADATA_CHARS = 4000
+
+
+def error_excerpt(stderr: str | None) -> str | None:
+    """Trim stderr to a bounded excerpt suitable for storing in
+    repository metadata, or None if there's nothing to show."""
+    if not stderr:
+        return None
+    trimmed = stderr.strip()
+    if not trimmed:
+        return None
+    if len(trimmed) > MAX_ERROR_METADATA_CHARS:
+        return trimmed[:MAX_ERROR_METADATA_CHARS] + "... (truncated)"
+    return trimmed
+
+
+@dataclass(frozen=True)
+class ClaudeInvocation:
+    """The claude CLI invocation, independent of how the process is actually
+    executed (docker run vs k8s Job, Issue #31). ``extra_args`` holds every
+    CLI flag after ``--allowedTools <allowed_tools>`` (mcp-config flags,
+    --max-turns, --output-format) -- these never carry untrusted content, so
+    launchers may inline them directly into a shell command; ``prompt`` and
+    ``allowed_tools`` do carry orchestrator-composed / config-composed text
+    and should be passed via environment variables rather than interpolated
+    into a shell string.
+    """
+
+    prompt: str
+    allowed_tools: str
+    extra_args: list[str]
+    env: dict[str, str]
+
+
+def build_claude_invocation(
     *,
     workspace: Path,
     session_id: str,
@@ -121,30 +161,16 @@ def build_docker_command(
     allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
     include_git_relay: bool = True,
     mcp_config: dict[str, Any] | None = None,
-    memory: str | None = None,
-    cpus: str | None = None,
-    pids_limit: int | None = None,
-) -> list[str]:
-    """Build the `docker run ... claude -p ...` command.
+) -> ClaudeInvocation:
+    """Build the claude CLI arguments + env dict, independent of the
+    execution transport (docker run vs k8s Job, Issue #31).
 
     ``mcp_config``, when provided (ADR-028 direct-MCP mode), is written to
     the workspace as ``.mcp.json`` and wired in via ``--mcp-config
     /workspace/.mcp.json --strict-mcp-config``; ``allowed_tools`` should then
     include the corresponding ``mcp__<server>__<tool>`` names (see
     DIRECT_MCP_ALLOWED_TOOLS).
-
-    ``memory``/``cpus``/``pids_limit``, when omitted, resolve from the
-    ``RUNNER_MEMORY``/``RUNNER_CPUS``/``RUNNER_PIDS_LIMIT`` env vars, falling
-    back to ``"2g"``/``"2"``/``512`` (Issue #27: container resource limits).
-    Explicit call-site args always win over the env vars.
     """
-    if memory is None:
-        memory = os.environ.get("RUNNER_MEMORY", options.memory)
-    if cpus is None:
-        cpus = os.environ.get("RUNNER_CPUS", getattr(options, "cpus", "2"))
-    if pids_limit is None:
-        env_pids_limit = os.environ.get("RUNNER_PIDS_LIMIT")
-        pids_limit = int(env_pids_limit) if env_pids_limit else options.pids_limit
     claude_proxy_url = os.environ.get("CLAUDE_PROXY_URL")
     session_token = os.environ.get("CLAUDE_PROXY_SESSION_TOKEN")
     if not claude_proxy_url or not session_token:
@@ -183,6 +209,55 @@ def build_docker_command(
     if mcp_config is not None:
         (workspace / ".mcp.json").write_text(json.dumps(mcp_config, ensure_ascii=False, indent=2), encoding="utf-8")
         mcp_args = ["--mcp-config", "/workspace/.mcp.json", "--strict-mcp-config"]
+
+    extra_args = [*mcp_args, "--max-turns", str(options.max_turns), "--output-format", "json"]
+    return ClaudeInvocation(prompt=prompt, allowed_tools=allowed_tools, extra_args=extra_args, env=env)
+
+
+def build_docker_command(
+    *,
+    workspace: Path,
+    session_id: str,
+    role: str,
+    prompt: str,
+    options: ClaudeDigestOptions,
+    allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
+    include_git_relay: bool = True,
+    mcp_config: dict[str, Any] | None = None,
+    memory: str | None = None,
+    cpus: str | None = None,
+    pids_limit: int | None = None,
+) -> list[str]:
+    """Build the `docker run ... claude -p ...` command (compose / local-dev
+    launcher, unchanged behavior).
+
+    ``memory``/``cpus``/``pids_limit``, when omitted, resolve from the
+    ``RUNNER_MEMORY``/``RUNNER_CPUS``/``RUNNER_PIDS_LIMIT`` env vars, falling
+    back to ``"2g"``/``"2"``/``512`` (Issue #27: container resource limits).
+    Explicit call-site args always win over the env vars.
+    """
+    if memory is None:
+        memory = os.environ.get("RUNNER_MEMORY", options.memory)
+    if cpus is None:
+        cpus = os.environ.get("RUNNER_CPUS", getattr(options, "cpus", "2"))
+    if pids_limit is None:
+        env_pids_limit = os.environ.get("RUNNER_PIDS_LIMIT")
+        pids_limit = int(env_pids_limit) if env_pids_limit else options.pids_limit
+
+    invocation = build_claude_invocation(
+        workspace=workspace,
+        session_id=session_id,
+        role=role,
+        prompt=prompt,
+        options=options,
+        allowed_tools=allowed_tools,
+        include_git_relay=include_git_relay,
+        mcp_config=mcp_config,
+    )
+    # Copy, never mutate invocation.env in place -- ClaudeInvocation is
+    # conceptually immutable (frozen dataclass), and the k8s launcher's
+    # _build_env does the same copy-before-mutate for symmetry.
+    env = dict(invocation.env)
 
     # ADR-025: when the scheduler runs inside the docker-compose resident
     # stack, RUNNER_NETWORK points at the Docker-internal network so the
@@ -234,14 +309,10 @@ def build_docker_command(
         options.image,
         "claude",
         "-p",
-        prompt,
+        invocation.prompt,
         "--allowedTools",
-        allowed_tools,
-        *mcp_args,
-        "--max-turns",
-        str(options.max_turns),
-        "--output-format",
-        "json",
+        invocation.allowed_tools,
+        *invocation.extra_args,
     ]
 
 
@@ -336,6 +407,46 @@ def build_direct_mcp_config(*, session_token: str) -> dict[str, Any]:
     }
 
 
+def run_claude_via_kubernetes(
+    *,
+    workspace: Path,
+    session_id: str,
+    role: str,
+    prompt: str,
+    options: ClaudeDigestOptions,
+    allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
+    include_git_relay: bool = True,
+    mcp_config: dict[str, Any] | None = None,
+) -> tuple[int, str, str]:
+    """Run the claude CLI as a k8s Job instead of a nested `docker run`
+    (Issue #31: k3s scheduler Pods have no docker). Shared by run_claude_digest
+    and run_invest_digest (invest_digest.py). Returns (exit_code, stdout,
+    stderr) with the same semantics as the docker path: stdout/stderr are
+    read back from the ``.claude-stdout.json``/``.claude-stderr.log`` files
+    the Job writes into the shared-PVC workspace.
+    """
+    from shichimimi_agent.runner.k8s_claude_launcher import KubernetesClaudeLauncher
+
+    invocation = build_claude_invocation(
+        workspace=workspace,
+        session_id=session_id,
+        role=role,
+        prompt=prompt,
+        options=options,
+        allowed_tools=allowed_tools,
+        include_git_relay=include_git_relay,
+        mcp_config=mcp_config,
+    )
+    launcher = KubernetesClaudeLauncher()
+    return launcher.run(
+        workspace=workspace,
+        session_id=session_id,
+        role=role,
+        invocation=invocation,
+        timeout_seconds=options.timeout_seconds,
+    )
+
+
 def run_claude_digest(
     *,
     config: AppConfig,
@@ -378,22 +489,34 @@ def run_claude_digest(
         git_proxy_url=git_proxy_url_for_prompt,
     )
 
-    cmd = build_docker_command(
-        workspace=workspace,
-        session_id=session_id,
-        role=role,
-        prompt=prompt,
-        options=options,
-        allowed_tools=allowed_tools,
-        mcp_config=mcp_config,
-    )
-    completed = subprocess.run(
-        cmd, cwd=config.root, text=True, capture_output=True, timeout=options.timeout_seconds
-    )
+    if os.environ.get("RUNNER_BACKEND") == "kubernetes":
+        exit_code, stdout, stderr = run_claude_via_kubernetes(
+            workspace=workspace,
+            session_id=session_id,
+            role=role,
+            prompt=prompt,
+            options=options,
+            allowed_tools=allowed_tools,
+            mcp_config=mcp_config,
+        )
+    else:
+        cmd = build_docker_command(
+            workspace=workspace,
+            session_id=session_id,
+            role=role,
+            prompt=prompt,
+            options=options,
+            allowed_tools=allowed_tools,
+            mcp_config=mcp_config,
+        )
+        completed = subprocess.run(
+            cmd, cwd=config.root, text=True, capture_output=True, timeout=options.timeout_seconds
+        )
+        exit_code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
 
     verified = False
     commit_sha = None
-    if completed.returncode == 0:
+    if exit_code == 0:
         verified, commit_sha = _verify_published(notes_repo=options.notes_repo, relative_path=relative_path)
 
     repository.record_document(
@@ -408,14 +531,15 @@ def run_claude_digest(
             "target_repo": options.notes_repo,
             "target_path": relative_path,
             "verified": verified,
-            "exit_code": completed.returncode,
+            "exit_code": exit_code,
+            "error": error_excerpt(stderr) if exit_code != 0 else None,
         },
     )
 
     return ClaudeDigestResult(
-        exit_code=completed.returncode if verified else (completed.returncode or 1),
-        stdout=completed.stdout,
-        stderr=completed.stderr,
+        exit_code=exit_code if verified else (exit_code or 1),
+        stdout=stdout,
+        stderr=stderr,
         workspace=workspace,
         verified=verified,
         verified_path=relative_path if verified else None,
