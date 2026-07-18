@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import time
 import unittest
@@ -307,6 +308,144 @@ class SchedulerEngineTest(unittest.TestCase):
         engine.run_once()
         self.assertEqual(len(calls), 1)
 
+    # -- ADR-034 (Issue #34): notifier injection + duration/attempts --
+
+    def test_duration_and_attempts_populated_on_success(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        engine = SchedulerEngine(config=config, repository=self.repository, executors={"job-a": lambda job: None})
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertIsNotNone(results[0].duration_seconds)
+        self.assertGreaterEqual(results[0].duration_seconds, 0)
+        self.assertEqual(results[0].attempts, 1)
+
+    def test_duration_and_attempts_populated_on_failure_with_retries(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True, "backoff_limit": 2}]
+        config = _make_config(jobs)
+
+        def _fail(job: dict) -> None:
+            raise RuntimeError("boom")
+
+        engine = SchedulerEngine(config=config, repository=self.repository, executors={"job-a": _fail})
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertIsNotNone(results[0].duration_seconds)
+        self.assertGreaterEqual(results[0].duration_seconds, 0)
+        self.assertEqual(results[0].attempts, 3)  # backoff_limit=2 -> 1 initial + 2 retries
+
+    def test_skipped_results_leave_duration_and_attempts_none(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        engine = SchedulerEngine(config=config, repository=self.repository, executors={})
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(results[0].status, "skipped")
+        self.assertIsNone(results[0].duration_seconds)
+        self.assertIsNone(results[0].attempts)
+
+    def test_notifier_called_once_for_succeeded_result(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        notified: list = []
+        engine = SchedulerEngine(
+            config=config,
+            repository=self.repository,
+            executors={"job-a": lambda job: None},
+            notifier=notified.append,
+        )
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(len(notified), 1)
+        self.assertIs(notified[0], results[0])
+        self.assertEqual(notified[0].status, "succeeded")
+
+    def test_notifier_called_once_for_failed_result(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True, "backoff_limit": 0}]
+        config = _make_config(jobs)
+        notified: list = []
+
+        def _fail(job: dict) -> None:
+            raise RuntimeError("boom")
+
+        engine = SchedulerEngine(
+            config=config, repository=self.repository, executors={"job-a": _fail}, notifier=notified.append
+        )
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(len(notified), 1)
+        self.assertIs(notified[0], results[0])
+        self.assertEqual(notified[0].status, "failed")
+
+    def test_notifier_not_called_for_no_executor_skip(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        notified: list = []
+        engine = SchedulerEngine(config=config, repository=self.repository, executors={}, notifier=notified.append)
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(results[0].status, "skipped")
+        self.assertEqual(notified, [])
+
+    def test_notifier_not_called_for_double_fire_skip(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        notified: list = []
+        engine = SchedulerEngine(
+            config=config,
+            repository=self.repository,
+            executors={"job-a": lambda job: None},
+            notifier=notified.append,
+        )
+        engine.run_pending(jst(2026, 7, 5, 17, 30))
+        notified.clear()
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(results[0].status, "skipped")
+        self.assertEqual(notified, [])
+
+    def test_notifier_called_for_except_branch_failed_result(self) -> None:
+        """The run_pending except branch (an unexpected exception raised
+        before _dispatch, not a job/executor failure) also produces a failed
+        JobRunResult that must be notified -- not just _dispatch's own
+        failures."""
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        notified: list = []
+        engine = SchedulerEngine(
+            config=config,
+            repository=self.repository,
+            executors={"job-a": lambda job: None},
+            notifier=notified.append,
+        )
+
+        class _BoomCron:
+            def matches(self, at: datetime) -> bool:
+                raise RuntimeError("cron boom")
+
+        engine._crons["job-a"] = _BoomCron()  # type: ignore[assignment]
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(results[0].status, "failed")
+        self.assertIn("cron boom", results[0].reason)
+        self.assertEqual(len(notified), 1)
+        self.assertIs(notified[0], results[0])
+
+    def test_notifier_none_is_noop(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+        engine = SchedulerEngine(config=config, repository=self.repository, executors={"job-a": lambda job: None})
+        results = engine.run_pending(jst(2026, 7, 5, 17, 30))
+        self.assertEqual(results[0].status, "succeeded")
+
+    def test_notifier_exception_is_not_swallowed_by_engine(self) -> None:
+        jobs = [{"name": "job-a", "role": "x_collector", "cron": "30 17 * * *", "enabled": True}]
+        config = _make_config(jobs)
+
+        def _boom_notifier(result: object) -> None:
+            raise RuntimeError("notify boom")
+
+        engine = SchedulerEngine(
+            config=config,
+            repository=self.repository,
+            executors={"job-a": lambda job: None},
+            notifier=_boom_notifier,
+        )
+        with self.assertRaises(RuntimeError):
+            engine.run_pending(jst(2026, 7, 5, 17, 30))
+
 
 class ScheduleRunCliTest(unittest.TestCase):
     def test_schedule_run_once_invokes_engine(self) -> None:
@@ -328,6 +467,91 @@ class ScheduleRunCliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         fake_engine.run_once.assert_called_once()
+
+    def test_schedule_run_wires_notifier_kwarg_when_env_set(self) -> None:
+        from shichimimi_agent import cli
+
+        fake_engine = mock.Mock()
+        fake_engine.run_once.return_value = []
+        captured_kwargs: dict = {}
+
+        def _capture_engine(**kwargs):
+            captured_kwargs.update(kwargs)
+            return fake_engine
+
+        with mock.patch.object(cli, "_load_validated_config") as load_cfg, \
+             mock.patch.object(cli, "migrate"), \
+             mock.patch.object(cli, "Repository") as repo_cls, \
+             mock.patch.object(cli, "_build_scheduler_executors", return_value={}), \
+             mock.patch("shichimimi_agent.scheduler.engine.SchedulerEngine", side_effect=_capture_engine), \
+             mock.patch.dict(
+                 os.environ,
+                 {"SLACK_NOTIFY_URL": "http://auth-proxy:18081", "SLACK_NOTIFY_SESSION_TOKEN": "test-token"},
+             ):
+            load_cfg.return_value = mock.Mock(root=Path("."))
+            repo_cls.for_root.return_value = mock.Mock()
+            args = mock.Mock(root=None, once=True)
+            cli.cmd_schedule_run(args)
+
+        self.assertIsNotNone(captured_kwargs.get("notifier"))
+        self.assertTrue(callable(captured_kwargs["notifier"]))
+
+    def test_schedule_run_notifier_is_none_when_env_unset(self) -> None:
+        from shichimimi_agent import cli
+
+        fake_engine = mock.Mock()
+        fake_engine.run_once.return_value = []
+        captured_kwargs: dict = {}
+
+        def _capture_engine(**kwargs):
+            captured_kwargs.update(kwargs)
+            return fake_engine
+
+        with mock.patch.object(cli, "_load_validated_config") as load_cfg, \
+             mock.patch.object(cli, "migrate"), \
+             mock.patch.object(cli, "Repository") as repo_cls, \
+             mock.patch.object(cli, "_build_scheduler_executors", return_value={}), \
+             mock.patch("shichimimi_agent.scheduler.engine.SchedulerEngine", side_effect=_capture_engine), \
+             mock.patch.dict(os.environ, {"SLACK_NOTIFY_URL": "", "SLACK_NOTIFY_SESSION_TOKEN": ""}):
+            load_cfg.return_value = mock.Mock(root=Path("."))
+            repo_cls.for_root.return_value = mock.Mock()
+            args = mock.Mock(root=None, once=True)
+            cli.cmd_schedule_run(args)
+
+        self.assertIsNone(captured_kwargs.get("notifier"))
+
+
+class BuildSchedulerNotifierTest(unittest.TestCase):
+    def test_returns_none_when_both_env_vars_unset(self) -> None:
+        from shichimimi_agent import cli
+
+        with mock.patch.dict(os.environ, {"SLACK_NOTIFY_URL": "", "SLACK_NOTIFY_SESSION_TOKEN": ""}):
+            self.assertIsNone(cli._build_scheduler_notifier())
+
+    def test_returns_none_when_only_url_set(self) -> None:
+        from shichimimi_agent import cli
+
+        with mock.patch.dict(
+            os.environ, {"SLACK_NOTIFY_URL": "http://auth-proxy:18081", "SLACK_NOTIFY_SESSION_TOKEN": ""}
+        ):
+            self.assertIsNone(cli._build_scheduler_notifier())
+
+    def test_returns_none_when_only_token_set(self) -> None:
+        from shichimimi_agent import cli
+
+        with mock.patch.dict(os.environ, {"SLACK_NOTIFY_URL": "", "SLACK_NOTIFY_SESSION_TOKEN": "test-token"}):
+            self.assertIsNone(cli._build_scheduler_notifier())
+
+    def test_returns_callable_when_both_env_vars_set(self) -> None:
+        from shichimimi_agent import cli
+
+        with mock.patch.dict(
+            os.environ,
+            {"SLACK_NOTIFY_URL": "http://auth-proxy:18081", "SLACK_NOTIFY_SESSION_TOKEN": "test-token"},
+        ):
+            notifier = cli._build_scheduler_notifier()
+        self.assertIsNotNone(notifier)
+        self.assertTrue(callable(notifier))
 
 
 if __name__ == "__main__":

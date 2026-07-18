@@ -42,6 +42,13 @@ class JobRunResult:
     job_name: str
     status: str  # "succeeded" | "failed" | "skipped"
     reason: str | None = None
+    # ADR-034: populated by _dispatch's retry loop for the jobs it actually
+    # runs (an executor was registered and at least one attempt started).
+    # Left None for results that never reach _dispatch's loop (cron
+    # mismatch, no-executor skip, same-minute double-fire skip, or an
+    # unexpected exception raised before dispatch).
+    duration_seconds: float | None = None
+    attempts: int | None = None
 
 
 @dataclass
@@ -65,6 +72,7 @@ class SchedulerEngine:
         repository: Any = None,
         now_fn: Callable[[], datetime] = now_jst,
         sleep_fn: Callable[[float], None] = time.sleep,
+        notifier: Callable[[JobRunResult], None] | None = None,
     ) -> None:
         # `repository` is accepted but unused by the engine itself (kept
         # for API stability / potential future engine-level bookkeeping);
@@ -73,6 +81,15 @@ class SchedulerEngine:
         self._executors = executors
         self._now_fn = now_fn
         self._sleep_fn = sleep_fn
+        # ADR-034: injected alongside executors/now_fn/sleep_fn, same pattern.
+        # None (the default) is a no-op -- local/dev and every pre-existing
+        # test are unaffected unless a notifier is explicitly wired in (the
+        # CLI wires one from SLACK_NOTIFY_URL/SLACK_NOTIFY_SESSION_TOKEN).
+        # Fail-open (never let a notification failure affect job success) is
+        # the injected callable's own responsibility, not the engine's: any
+        # exception raised out of `notifier` is *not* caught here and
+        # propagates out of run_pending.
+        self._notifier = notifier
         self._jobs = self._load_jobs(config)
         self._last_fired: dict[str, datetime] = {}
 
@@ -117,26 +134,55 @@ class SchedulerEngine:
         current_minute = at.replace(second=0, microsecond=0)
 
         for job in self._jobs:
-            try:
-                cron = self._crons[job.name]
-                if not cron.matches(current_minute):
-                    continue
-
-                if job.concurrency_policy == "forbid":
-                    last = self._last_fired.get(job.name)
-                    if last == current_minute:
-                        results.append(
-                            JobRunResult(job_name=job.name, status="skipped", reason="already fired this minute")
-                        )
-                        continue
-
-                self._last_fired[job.name] = current_minute
-                results.append(self._dispatch(job))
-            except Exception as exc:  # noqa: BLE001 - one job's bug must not break the loop
-                print(f"scheduler: job {job.name!r} raised unexpectedly: {exc}", file=sys.stderr)
-                results.append(JobRunResult(job_name=job.name, status="failed", reason=str(exc)))
+            result = self._run_job_safely(job, current_minute)
+            if result is None:
+                continue
+            results.append(result)
+            # Central, single notify call per produced result (ADR-034),
+            # deliberately outside the try/except in `_run_job_safely` so a
+            # notifier exception is never swallowed by that job's error
+            # handling and propagates straight out of run_pending.
+            self._notify(result)
 
         return results
+
+    def _run_job_safely(self, job: _JobSpec, current_minute: datetime) -> JobRunResult | None:
+        """Cron-match + dispatch a single job, catching anything unexpected.
+
+        Returns None when the job simply didn't match this minute (no result
+        to record/notify at all), otherwise always a JobRunResult -- this is
+        the sole per-job try/except boundary so one job's bug can't break the
+        loop for the rest.
+        """
+        try:
+            cron = self._crons[job.name]
+            if not cron.matches(current_minute):
+                return None
+
+            if job.concurrency_policy == "forbid":
+                last = self._last_fired.get(job.name)
+                if last == current_minute:
+                    return JobRunResult(job_name=job.name, status="skipped", reason="already fired this minute")
+
+            self._last_fired[job.name] = current_minute
+            return self._dispatch(job)
+        except Exception as exc:  # noqa: BLE001 - one job's bug must not break the loop
+            print(f"scheduler: job {job.name!r} raised unexpectedly: {exc}", file=sys.stderr)
+            return JobRunResult(job_name=job.name, status="failed", reason=str(exc))
+
+    def _notify(self, result: JobRunResult) -> None:
+        """Fire the injected notifier for terminal results only.
+
+        Skipped results (no-executor placeholder jobs, same-minute
+        double-fire guard) are always suppressed -- notifying either would
+        just be steady-state noise (ADR-034 rev.2 point 3). No-op when no
+        notifier was injected.
+        """
+        if self._notifier is None:
+            return
+        if result.status not in ("succeeded", "failed"):
+            return
+        self._notifier(result)
 
     def _dispatch(self, job: _JobSpec) -> JobRunResult:
         executor = self._executors.get(job.name)
@@ -147,6 +193,7 @@ class SchedulerEngine:
         attempts = 0
         max_attempts = max(1, job.backoff_limit + 1)
         last_error: Exception | None = None
+        started_at = time.monotonic()
 
         while attempts < max_attempts:
             attempts += 1
@@ -161,10 +208,20 @@ class SchedulerEngine:
                 last_error = exc
                 print(f"scheduler: job {job.name!r} attempt {attempts} failed: {exc}", file=sys.stderr)
 
-        if last_error is None:
-            return JobRunResult(job_name=job.name, status="succeeded")
+        duration_seconds = time.monotonic() - started_at
 
-        return JobRunResult(job_name=job.name, status="failed", reason=str(last_error))
+        if last_error is None:
+            return JobRunResult(
+                job_name=job.name, status="succeeded", duration_seconds=duration_seconds, attempts=attempts
+            )
+
+        return JobRunResult(
+            job_name=job.name,
+            status="failed",
+            reason=str(last_error),
+            duration_seconds=duration_seconds,
+            attempts=attempts,
+        )
 
     @staticmethod
     def _run_with_deadline(executor: Executor, job: dict[str, Any], deadline_seconds: float) -> None:

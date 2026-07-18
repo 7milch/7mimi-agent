@@ -80,6 +80,7 @@ class KustomizeRenderTest(unittest.TestCase):
             "GITHUB_APP_INSTALLATION_ID",
             "SLACK_BOT_TOKEN",
             "SLACK_CHANNEL_ID",
+            "SLACK_SYSLOG_CHANNEL_ID",
             "CLAUDE_PROXY_SESSION_TOKEN",
         }
         for deployment in self.by_kind.get("Deployment", []):

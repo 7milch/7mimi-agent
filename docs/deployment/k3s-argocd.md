@@ -37,6 +37,7 @@ Secret の実体は Git に一切置かない。`deploy/k8s/` の各マニフェ
 | `7mimi-agent-secrets` | `X_BEARER_TOKEN` | auth-proxy(x-mcp、ADR-023) | 必須 |
 | `7mimi-agent-secrets` | `SLACK_BOT_TOKEN` | auth-proxy(Slack 通知、ADR-026) | 任意(未設定時は `/v1/slack/notify` が unmount され invest digest の Slack publish のみ機能しない) |
 | `7mimi-agent-secrets` | `SLACK_CHANNEL_ID` | auth-proxy | 任意(`SLACK_BOT_TOKEN` と同様) |
+| `7mimi-agent-secrets` | `SLACK_SYSLOG_CHANNEL_ID` | auth-proxy(scheduler ジョブ成否の syslog 通知、ADR-034) | 任意(未設定時は syslog 通知のみ無効化され、digest 配送・ジョブ実行には影響しない) |
 | `7mimi-agent-secrets` | `JQUANTS_REFRESH_TOKEN` | auth-proxy(jq.* evidence tools、ADR-027) | 任意(未設定時は jq.* tools が unmount され `research stock` の J-Quants evidence 取得のみ機能しない) |
 | `github-app-key` | `github-app-key.pem` | auth-proxy(`GITHUB_APP_PRIVATE_KEY_PATH=/secrets/github-app-key.pem` として volume mount) | 必須 |
 | `ghcr-pull-secret` | `.dockerconfigjson` | 全 Deployment / scheduler ServiceAccount の `imagePullSecrets`(pull 用) | 任意(ghcr イメージが public の間は不要 — imagePullSecrets の参照先が無くても匿名 pull にフォールバックする。private 化する場合は必須) |

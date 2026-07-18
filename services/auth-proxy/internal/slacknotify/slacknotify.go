@@ -29,20 +29,32 @@ const (
 
 // Handler serves POST /v1/slack/notify.
 type Handler struct {
-	sessionToken string
-	botToken     string
-	channelID    string
-	apiBase      string
-	logger       *audit.Logger
-	httpClient   *http.Client
-	sleep        func(time.Duration)
+	sessionToken    string
+	botToken        string
+	channelID       string
+	syslogChannelID string
+	apiBase         string
+	logger          *audit.Logger
+	httpClient      *http.Client
+	sleep           func(time.Duration)
 }
 
+// Server-side fixed target labels a caller may request via notifyRequest.Target
+// (ADR-034): callers can never supply an arbitrary Slack channel ID, only pick
+// between these two operator-configured channels.
+const (
+	targetDigest = "digest"
+	targetSyslog = "syslog"
+)
+
 // NewHandler builds the slacknotify handler. sessionToken, botToken, and
-// channelID must all be non-empty (fail-closed; there is no default). apiBase
-// defaults to https://slack.com when empty (override via SLACK_API_BASE_URL
-// for tests).
-func NewHandler(sessionToken, botToken, channelID, apiBase string, logger *audit.Logger) (*Handler, error) {
+// channelID (the digest channel) must all be non-empty (fail-closed; there is
+// no default) -- a syslog-only configuration (channelID empty,
+// syslogChannelID set) is not supported. syslogChannelID may be empty: it
+// merely means requests with target="syslog" are rejected with 400 while
+// target=""/"digest" keeps working. apiBase defaults to https://slack.com
+// when empty (override via SLACK_API_BASE_URL for tests).
+func NewHandler(sessionToken, botToken, channelID, syslogChannelID, apiBase string, logger *audit.Logger) (*Handler, error) {
 	if sessionToken == "" {
 		return nil, errors.New("slacknotify: session token must not be empty")
 	}
@@ -56,14 +68,33 @@ func NewHandler(sessionToken, botToken, channelID, apiBase string, logger *audit
 		apiBase = defaultSlackAPIURL
 	}
 	return &Handler{
-		sessionToken: sessionToken,
-		botToken:     botToken,
-		channelID:    channelID,
-		apiBase:      apiBase,
-		logger:       logger,
-		httpClient:   &http.Client{Timeout: 20 * time.Second},
-		sleep:        time.Sleep,
+		sessionToken:    sessionToken,
+		botToken:        botToken,
+		channelID:       channelID,
+		syslogChannelID: syslogChannelID,
+		apiBase:         apiBase,
+		logger:          logger,
+		httpClient:      &http.Client{Timeout: 20 * time.Second},
+		sleep:           time.Sleep,
 	}, nil
+}
+
+// resolveChannel maps a notifyRequest.Target to the concrete Slack channel ID
+// to post to, and a normalized label safe to embed in audit log reasons.
+// ""/"digest" -> the (always-configured) digest channel; "syslog" -> the
+// optional syslog channel (error if unconfigured); anything else is rejected.
+func (h *Handler) resolveChannel(target string) (channelID string, label string, err error) {
+	switch target {
+	case "", targetDigest:
+		return h.channelID, targetDigest, nil
+	case targetSyslog:
+		if h.syslogChannelID == "" {
+			return "", targetSyslog, errors.New("target \"syslog\" is not configured (SLACK_SYSLOG_CHANNEL_ID unset)")
+		}
+		return h.syslogChannelID, targetSyslog, nil
+	default:
+		return "", target, errors.New("unknown target: " + target)
+	}
 }
 
 // Routes registers the handler's HTTP routes on a mux.
@@ -84,6 +115,11 @@ func (h *Handler) authorize(r *http.Request) bool {
 
 type notifyRequest struct {
 	Text string `json:"text"`
+	// Target selects one of the two server-side fixed channels: ""/"digest"
+	// (existing behavior, back-compatible default) or "syslog". Any other
+	// value is rejected with 400 -- callers can never address an arbitrary
+	// Slack channel ID (ADR-034).
+	Target string `json:"target"`
 }
 
 type notifyResponse struct {
@@ -93,33 +129,43 @@ type notifyResponse struct {
 func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
+	// Target is not known yet at this point (body unread/unparsed), so
+	// pre-parse failures are audited against the "unknown" label rather
+	// than a real target.
 	if !h.authorize(r) {
-		h.audit("block", "unauthorized", 0, 0, time.Since(start))
+		h.audit("block", "unauthorized", "unknown", 0, 0, time.Since(start))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		h.audit("block", "read error", 0, 0, time.Since(start))
+		h.audit("block", "read error", "unknown", 0, 0, time.Since(start))
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	if len(body) > maxBodyBytes {
-		h.audit("block", "payload too large", 0, len(body), time.Since(start))
+		h.audit("block", "payload too large", "unknown", 0, len(body), time.Since(start))
 		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 
 	var req notifyRequest
 	if len(body) == 0 || json.Unmarshal(body, &req) != nil {
-		h.audit("block", "invalid json", 0, len(body), time.Since(start))
+		h.audit("block", "invalid json", "unknown", 0, len(body), time.Since(start))
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	if req.Text == "" {
-		h.audit("block", "empty text", 0, 0, time.Since(start))
+		h.audit("block", "empty text", req.Target, 0, 0, time.Since(start))
 		http.Error(w, "text must not be empty", http.StatusBadRequest)
+		return
+	}
+
+	channelID, targetLabel, err := h.resolveChannel(req.Target)
+	if err != nil {
+		h.audit("block", "invalid target: "+err.Error(), targetLabel, 0, 0, time.Since(start))
+		http.Error(w, "invalid target: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -129,14 +175,14 @@ func (h *Handler) handleNotify(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			h.sleep(chunkDelay)
 		}
-		if err := h.postChunk(chunk); err != nil {
-			h.audit("block", "slack api error chunk="+strconv.Itoa(i), len(chunks), len(req.Text), time.Since(start))
+		if err := h.postChunk(channelID, chunk); err != nil {
+			h.audit("block", "slack api error chunk="+strconv.Itoa(i), targetLabel, len(chunks), len(req.Text), time.Since(start))
 			http.Error(w, "upstream slack api error at chunk "+strconv.Itoa(i)+": "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	}
 
-	h.audit("allow", "", len(chunks), len(req.Text), time.Since(start))
+	h.audit("allow", "", targetLabel, len(chunks), len(req.Text), time.Since(start))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(notifyResponse{Chunks: len(chunks)})
@@ -154,9 +200,9 @@ func (e *slackAPIError) Error() string {
 	return e.code
 }
 
-func (h *Handler) postChunk(text string) error {
+func (h *Handler) postChunk(channelID, text string) error {
 	payload, err := json.Marshal(map[string]string{
-		"channel": h.channelID,
+		"channel": channelID,
 		"text":    text,
 	})
 	if err != nil {
@@ -267,11 +313,15 @@ func hardSplit(line string, maxLen int) []string {
 	return parts
 }
 
-func (h *Handler) audit(decision, reason string, chunks, totalLen int, duration time.Duration) {
+// audit records a decision. target is the normalized target label
+// ("digest"/"syslog"/"unknown"/the raw invalid value) -- never a Slack
+// channel ID -- so it is always safe to log (ADR-034).
+func (h *Handler) audit(decision, reason, target string, chunks, totalLen int, duration time.Duration) {
 	if h.logger == nil {
 		return
 	}
 	parts := []string{
+		"target=" + target,
 		"chunks=" + strconv.Itoa(chunks),
 		"total_len=" + strconv.Itoa(totalLen),
 		"duration_ms=" + strconv.FormatInt(duration.Milliseconds(), 10),

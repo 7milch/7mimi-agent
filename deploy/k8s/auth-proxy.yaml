@@ -82,6 +82,17 @@ spec:
                   name: 7mimi-agent-secrets
                   key: SLACK_CHANNEL_ID
                   optional: true
+            # ADR-034: optional on top of SLACK_CHANNEL_ID above (which
+            # remains the mount gate -- a syslog-only configuration is not
+            # supported). Unset leaves /v1/slack/notify mounted for
+            # target=""/"digest" only; target="syslog" requests get a 400
+            # from the handler itself until this key is populated.
+            - name: SLACK_SYSLOG_CHANNEL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: 7mimi-agent-secrets
+                  key: SLACK_SYSLOG_CHANNEL_ID
+                  optional: true
             # ADR-027: J-Quants evidence tools (jq.*). Optional -- unset
             # keeps the jq.* tools unmounted, same pattern as Slack above.
             - name: JQUANTS_REFRESH_TOKEN

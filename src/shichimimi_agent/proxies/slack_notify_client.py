@@ -26,12 +26,24 @@ class SlackNotifyClient:
     # can take ~40s upstream, so keep the client timeout comfortably above it.
     timeout_seconds: float = 120.0
 
-    def notify(self, text: str) -> int:
+    def notify(self, text: str, target: str | None = None) -> int:
         """POST text to auth-proxy's /v1/slack/notify. Returns the chunk count.
+
+        target selects one of auth-proxy's two server-side fixed channels
+        (ADR-034): None (the default) omits the "target" key from the wire
+        payload entirely, which is the existing digest wire format --
+        callers that never pass target (e.g. invest-x-daily-digest) see zero
+        change to what goes over the wire. Pass target="syslog" to route to
+        the syslog channel instead; auth-proxy rejects any other value (or
+        "syslog" when SLACK_SYSLOG_CHANNEL_ID is unconfigured) with 400,
+        surfaced here as SlackNotifyError.
 
         Raises SlackNotifyError on any non-200 response or transport failure.
         """
-        payload = json.dumps({"text": text}).encode("utf-8")
+        body: dict[str, str] = {"text": text}
+        if target is not None:
+            body["target"] = target
+        payload = json.dumps(body).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url.rstrip('/')}/v1/slack/notify",
             data=payload,

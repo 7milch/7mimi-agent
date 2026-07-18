@@ -218,6 +218,14 @@ class ComposeConfigTest(unittest.TestCase):
         self.assertEqual(auth_proxy_env["SLACK_BOT_TOKEN"], "${SLACK_BOT_TOKEN:-}")
         self.assertEqual(auth_proxy_env["SLACK_CHANNEL_ID"], "${SLACK_CHANNEL_ID:-}")
 
+    def test_auth_proxy_slack_syslog_channel_is_optional(self) -> None:
+        """ADR-034: SLACK_SYSLOG_CHANNEL_ID must also NOT use the required
+        ${VAR:?...} syntax -- unset should just leave target="syslog"
+        notify requests 400ing, never break `docker compose config` or
+        the digest target's back-compat mount."""
+        auth_proxy_env = self.compose["services"]["auth-proxy"]["environment"]
+        self.assertEqual(auth_proxy_env["SLACK_SYSLOG_CHANNEL_ID"], "${SLACK_SYSLOG_CHANNEL_ID:-}")
+
     def test_required_secrets_use_required_var_syntax(self) -> None:
         """Secrets must use ${VAR:?msg} so `docker compose config` fails
         loudly instead of silently starting with an empty/missing value

@@ -218,16 +218,21 @@ func handleSessionIssue(staticToken string, store *session.Store) http.HandlerFu
 	}
 }
 
-// mountSlackNotify mounts POST /v1/slack/notify (ADR-026) only when
+// mountSlackNotify mounts POST /v1/slack/notify (ADR-026, ADR-034) only when
 // AUTH_PROXY_SESSION_TOKEN, SLACK_BOT_TOKEN, and SLACK_CHANNEL_ID are all
 // configured; otherwise it logs a non-sensitive reason and leaves the route
-// unmounted. Both Slack vars are optional at the platform level (the
-// investment digest job is opt-in). SLACK_API_BASE_URL is an internal
-// override (tests only) for the Slack Web API base URL.
+// unmounted. SLACK_CHANNEL_ID (the digest channel) remains the mount gate
+// even when SLACK_SYSLOG_CHANNEL_ID is set: a syslog-only configuration is
+// not supported, matching slacknotify.NewHandler's fail-closed contract.
+// SLACK_SYSLOG_CHANNEL_ID (ADR-034) is optional on top of that -- when unset,
+// the route still mounts for target=""/"digest", but target="syslog"
+// requests are rejected with 400 by the handler itself. SLACK_API_BASE_URL
+// is an internal override (tests only) for the Slack Web API base URL.
 func mountSlackNotify(mux *http.ServeMux, logger *audit.Logger) {
 	sessionToken := os.Getenv("AUTH_PROXY_SESSION_TOKEN")
 	botToken := os.Getenv("SLACK_BOT_TOKEN")
 	channelID := os.Getenv("SLACK_CHANNEL_ID")
+	syslogChannelID := os.Getenv("SLACK_SYSLOG_CHANNEL_ID")
 	apiBase := os.Getenv("SLACK_API_BASE_URL")
 	if sessionToken == "" {
 		log.Printf("slack-notify disabled: no session token configured")
@@ -241,8 +246,11 @@ func mountSlackNotify(mux *http.ServeMux, logger *audit.Logger) {
 		log.Printf("slack-notify disabled: SLACK_CHANNEL_ID not set")
 		return
 	}
+	if syslogChannelID == "" {
+		log.Printf("slack-notify: SLACK_SYSLOG_CHANNEL_ID not set; target=\"syslog\" requests will be rejected with 400")
+	}
 
-	handler, err := slacknotify.NewHandler(sessionToken, botToken, channelID, apiBase, logger)
+	handler, err := slacknotify.NewHandler(sessionToken, botToken, channelID, syslogChannelID, apiBase, logger)
 	if err != nil {
 		log.Printf("slack-notify disabled: handler construction failed")
 		return

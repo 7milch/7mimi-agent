@@ -1,10 +1,16 @@
 name: test
 
-# Runs the Python unit test suite on every PR and every push to main.
-# config-validate.yaml additionally required-checks config/** changes with
-# the same test run plus `config validate`; this workflow is the general
-# regression gate so a change outside config/** (e.g. src/**, deploy/**,
-# .github/**) can't merge with a broken test suite either.
+# Runs the Python unit test suite and the Go proxy services' test suites on
+# every PR and every push to main. config-validate.yaml additionally
+# required-checks config/** changes with the same Python test run plus
+# `config validate`; this workflow is the general regression gate so a
+# change outside config/** (e.g. src/**, services/**, deploy/**, .github/**)
+# can't merge with a broken test suite either.
+#
+# go-test (ADR-034 / Issue #34): before this, `go test ./...` for
+# claude-proxy/auth-proxy/egress-proxy ran nowhere in CI -- the sandbox this
+# repo is normally developed in has no Go toolchain, so this job is the only
+# place those tests execute at all.
 on:
   pull_request:
     branches: [main]
@@ -32,3 +38,24 @@ jobs:
         run: python3 -m unittest discover -s tests -v
         env:
           PYTHONPATH: src
+
+  go-test:
+    strategy:
+      matrix:
+        service: [claude-proxy, auth-proxy, egress-proxy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          # None of the 3 services have external dependencies (stdlib only,
+          # no go.sum committed anywhere in this repo) -- cache: false
+          # avoids setup-go erroring on an unresolvable cache-dependency-path
+          # glob rather than caching a module list that doesn't exist.
+          cache: false
+
+      - name: Run go test
+        run: go test ./...
+        working-directory: services/${{ matrix.service }}

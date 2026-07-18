@@ -12,13 +12,21 @@ import (
 )
 
 const (
-	testBotToken  = "test-bot-token-value"
-	testChannelID = "C0123456789"
+	testBotToken        = "test-bot-token-value"
+	testChannelID       = "C0123456789"
+	testSyslogChannelID = "C0SYSLOG9999"
 )
 
 func newTestHandler(t *testing.T, slackAPI *httptest.Server) *Handler {
 	t.Helper()
-	h, err := NewHandler("test-session-token", testBotToken, testChannelID, slackAPI.URL, audit.NewLogger(&strings.Builder{}))
+	return newTestHandlerWithSyslog(t, slackAPI, "")
+}
+
+// newTestHandlerWithSyslog additionally configures SLACK_SYSLOG_CHANNEL_ID's
+// in-process equivalent, for target="syslog" routing tests.
+func newTestHandlerWithSyslog(t *testing.T, slackAPI *httptest.Server, syslogChannelID string) *Handler {
+	t.Helper()
+	h, err := NewHandler("test-session-token", testBotToken, testChannelID, syslogChannelID, slackAPI.URL, audit.NewLogger(&strings.Builder{}))
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -71,6 +79,98 @@ func okSlackAPIServer(t *testing.T, received *[]string) *httptest.Server {
 	}))
 }
 
+// channelCapturingSlackAPIServer returns a stub Slack Web API server that
+// records the "channel" field of every posted chunk (not just the text),
+// for asserting target routing picks the expected channel ID.
+func channelCapturingSlackAPIServer(t *testing.T, receivedChannels *[]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Channel string `json:"channel"`
+			Text    string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if receivedChannels != nil {
+			*receivedChannels = append(*receivedChannels, payload.Channel)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+}
+
+// -- target routing (ADR-034 / Issue #34): 4 cases --
+
+func TestTargetRoutingDigestDefaultAndExplicitAreBackCompatible(t *testing.T) {
+	var receivedChannels []string
+	slackAPI := channelCapturingSlackAPIServer(t, &receivedChannels)
+	defer slackAPI.Close()
+	h := newTestHandlerWithSyslog(t, slackAPI, testSyslogChannelID)
+
+	for _, body := range []string{`{"text":"hi"}`, `{"text":"hi","target":"digest"}`, `{"text":"hi","target":""}`} {
+		rec := doNotify(t, h, "test-session-token", body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("body %q: expected 200, got %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if len(receivedChannels) != 3 {
+		t.Fatalf("expected 3 posted chunks, got %d", len(receivedChannels))
+	}
+	for _, ch := range receivedChannels {
+		if ch != testChannelID {
+			t.Fatalf("expected digest channel %q, got %q", testChannelID, ch)
+		}
+	}
+}
+
+func TestTargetRoutingSyslogConfiguredRoutesToSyslogChannel(t *testing.T) {
+	var receivedChannels []string
+	slackAPI := channelCapturingSlackAPIServer(t, &receivedChannels)
+	defer slackAPI.Close()
+	h := newTestHandlerWithSyslog(t, slackAPI, testSyslogChannelID)
+
+	rec := doNotify(t, h, "test-session-token", `{"text":"hi","target":"syslog"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(receivedChannels) != 1 || receivedChannels[0] != testSyslogChannelID {
+		t.Fatalf("expected syslog channel %q, got %v", testSyslogChannelID, receivedChannels)
+	}
+}
+
+func TestTargetRoutingSyslogUnconfiguredRejectedWith400(t *testing.T) {
+	var receivedChannels []string
+	slackAPI := channelCapturingSlackAPIServer(t, &receivedChannels)
+	defer slackAPI.Close()
+	// syslogChannelID left empty: SLACK_SYSLOG_CHANNEL_ID unset equivalent.
+	h := newTestHandlerWithSyslog(t, slackAPI, "")
+
+	rec := doNotify(t, h, "test-session-token", `{"text":"hi","target":"syslog"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(receivedChannels) != 0 {
+		t.Fatalf("expected no upstream Slack API call, got %v", receivedChannels)
+	}
+}
+
+func TestTargetRoutingUnknownTargetRejectedWith400(t *testing.T) {
+	var receivedChannels []string
+	slackAPI := channelCapturingSlackAPIServer(t, &receivedChannels)
+	defer slackAPI.Close()
+	h := newTestHandlerWithSyslog(t, slackAPI, testSyslogChannelID)
+
+	rec := doNotify(t, h, "test-session-token", `{"text":"hi","target":"bogus"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(receivedChannels) != 0 {
+		t.Fatalf("expected no upstream Slack API call, got %v", receivedChannels)
+	}
+}
+
 func TestNewHandlerRequiresAllFields(t *testing.T) {
 	logger := audit.NewLogger(&strings.Builder{})
 	cases := []struct {
@@ -85,7 +185,7 @@ func TestNewHandlerRequiresAllFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := NewHandler(tc.sessionToken, tc.botToken, tc.channelID, "", logger); err == nil {
+			if _, err := NewHandler(tc.sessionToken, tc.botToken, tc.channelID, "", "", logger); err == nil {
 				t.Fatalf("expected error, got nil")
 			}
 		})
@@ -278,7 +378,7 @@ func TestAuditLogsNoTextOrToken(t *testing.T) {
 	var logBuf strings.Builder
 	slackAPI := okSlackAPIServer(t, nil)
 	defer slackAPI.Close()
-	h, err := NewHandler("test-session-token", testBotToken, testChannelID, slackAPI.URL, audit.NewLogger(&logBuf))
+	h, err := NewHandler("test-session-token", testBotToken, testChannelID, "", slackAPI.URL, audit.NewLogger(&logBuf))
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -302,6 +402,9 @@ func TestAuditLogsNoTextOrToken(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, "chunks=") || !strings.Contains(logOutput, "total_len=") || !strings.Contains(logOutput, "duration_ms=") {
 		t.Fatalf("audit log missing expected metadata fields: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "target=digest") {
+		t.Fatalf("audit log missing target label: %s", logOutput)
 	}
 }
 

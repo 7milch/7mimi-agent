@@ -194,6 +194,21 @@ def _build_scheduler_executors(config: Any, repository: Repository) -> dict[str,
     }
 
 
+def _build_scheduler_notifier() -> Any:
+    """Wire the ADR-034 syslog-channel job-result notifier from
+    SLACK_NOTIFY_URL / SLACK_NOTIFY_SESSION_TOKEN when both are set --
+    the same auth-proxy env vars invest-x-daily-digest already uses (just a
+    different target). Returns None when either is unset, which
+    SchedulerEngine treats as a no-op (local/dev unaffected)."""
+    from shichimimi_agent.scheduler.notify import build_syslog_notifier
+
+    base_url = os.environ.get("SLACK_NOTIFY_URL", "")
+    session_token = os.environ.get("SLACK_NOTIFY_SESSION_TOKEN", "")
+    if not base_url or not session_token:
+        return None
+    return build_syslog_notifier(base_url, session_token)
+
+
 def cmd_schedule_run(args: argparse.Namespace) -> int:
     from shichimimi_agent.scheduler.engine import SchedulerEngine
 
@@ -205,7 +220,8 @@ def cmd_schedule_run(args: argparse.Namespace) -> int:
     migrate(default_db_path(config.root))
     repository = Repository.for_root(config.root)
     executors = _build_scheduler_executors(config, repository)
-    engine = SchedulerEngine(config=config, repository=repository, executors=executors)
+    notifier = _build_scheduler_notifier()
+    engine = SchedulerEngine(config=config, repository=repository, executors=executors, notifier=notifier)
 
     if args.once:
         results = engine.run_once()

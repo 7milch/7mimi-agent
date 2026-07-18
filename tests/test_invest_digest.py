@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import http.server
 import json
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -297,6 +299,69 @@ class SlackNotifyClientTest(unittest.TestCase):
         client = SlackNotifyClient(base_url="http://127.0.0.1:1", session_token="tok", timeout_seconds=0.2)
         with self.assertRaises(SlackNotifyError):
             client.notify("hello")
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class _RecordingNotifyHandler(http.server.BaseHTTPRequestHandler):
+    """Stands in for auth-proxy's /v1/slack/notify: records the decoded JSON
+    body of every POST (ADR-034 target field, in particular) and always
+    replies {"chunks": 1}. Never contacts the real Slack API."""
+
+    received: list[dict] = []
+
+    def log_message(self, *args: object) -> None:  # silence default stderr logging
+        return
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        payload = json.loads(body.decode("utf-8"))
+        self.__class__.received.append(payload)
+        resp = json.dumps({"chunks": 1}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+
+
+class SlackNotifyClientTargetFieldTest(unittest.TestCase):
+    """ADR-034: target is an optional wire field -- omitted entirely from the
+    JSON payload unless the caller explicitly passes one, so the existing
+    invest-x-daily-digest wire format (client.notify(text), no target) is
+    byte-for-byte unchanged."""
+
+    def setUp(self) -> None:
+        _RecordingNotifyHandler.received = []
+        self.port = _free_port()
+        self.server = http.server.HTTPServer(("127.0.0.1", self.port), _RecordingNotifyHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.client = SlackNotifyClient(
+            base_url=f"http://127.0.0.1:{self.port}", session_token="tok", timeout_seconds=5.0
+        )
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.thread.join(timeout=5)
+        self.server.server_close()
+
+    def test_target_omitted_from_payload_when_not_specified(self) -> None:
+        self.client.notify("hello")
+        self.assertEqual(len(_RecordingNotifyHandler.received), 1)
+        self.assertNotIn("target", _RecordingNotifyHandler.received[0])
+
+    def test_target_included_when_syslog_specified(self) -> None:
+        self.client.notify("hello", target="syslog")
+        self.assertEqual(len(_RecordingNotifyHandler.received), 1)
+        self.assertEqual(_RecordingNotifyHandler.received[0]["target"], "syslog")
 
 
 if __name__ == "__main__":
